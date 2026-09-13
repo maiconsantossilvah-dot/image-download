@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Encontre, selecione e baixe imagens de páginas públicas." />
+    <meta name="theme-color" content="#07110f" />
+    <title>Captura — Scanner de imagens</title>
+    <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="topbar__inner">
+        <a class="brand" href="./" aria-label="Captura — página inicial">
+          <span class="brand__icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M4 8V4h4M16 4h4v4M20 16v4h-4M8 20H4v-4M9 12h6"/></svg>
+          </span>
+          <span><strong>CAPTURA</strong><small>scanner de imagens</small></span>
+        </a>
+        <span class="safe"><span aria-hidden="true">✓</span> Acesso apenas a páginas públicas</span>
+      </div>
+    </header>
+
+    <main>
+      <section class="hero">
+        <div class="hero__inner">
+          <div class="hero__copy">
+            <p class="eyebrow">✦ Alta qualidade, em um só lugar</p>
+            <h1>Encontre cada imagem.<br><span>Baixe só o que importa.</span></h1>
+          </div>
+          <p class="hero__note">O scanner procura imagens comuns, versões responsivas, metadados sociais e fundos definidos no código da página.</p>
+
+          <form id="scan-form" class="scanner">
+            <label class="scanner__input">
+              <span class="sr-only">Endereço da página</span>
+              <svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>
+              <input id="url" type="url" inputmode="url" autocomplete="url" placeholder="Cole o link da página — exemplo.com/galeria" required />
+            </label>
+            <button id="scan-button" class="primary" type="submit">
+              <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 8V4h4M16 4h4v4M20 16v4h-4M8 20H4v-4M9 12h6"/></svg>
+              <span>Varrer página</span>
+            </button>
+          </form>
+          <div id="progress-wrap" class="progress-wrap" hidden><div class="progress"><span id="progress"></span></div><output id="progress-text">0%</output></div>
+        </div>
+      </section>
+
+      <section class="workspace" aria-live="polite">
+        <div id="status" class="status" role="status"></div>
+        <div id="empty" class="empty">
+          <div class="empty__copy">
+            <span class="empty__icon" aria-hidden="true">▧</span>
+            <h2>Sua galeria aparece aqui</h2>
+            <p>Cole o link de uma página pública. Depois, marque as miniaturas que quiser e receba tudo em um único arquivo ZIP.</p>
+            <div class="formats"><span>JPG</span><span>PNG</span><span>WEBP</span><span>SVG</span><span>+ outros</span></div>
+          </div>
+          <div class="empty__art" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><b></b></div>
+        </div>
+
+        <div id="results" hidden>
+          <div class="toolbar">
+            <div><h2><span id="count">0</span> <span id="count-label">imagens</span></h2><p id="source-host"></p></div>
+            <div class="toolbar__actions">
+              <label class="select-wrap"><span class="sr-only">Filtrar por formato</span><select id="format"><option value="TODOS">TODOS</option></select></label>
+              <label class="select-all"><input id="select-all" type="checkbox" /><span>Selecionar visíveis</span></label>
+            </div>
+          </div>
+          <div id="gallery" class="gallery"></div>
+        </div>
+      </section>
+    </main>
+
+    <div id="download-bar" class="download-bar" hidden>
+      <div><strong id="selected-count">0 selecionadas</strong><button id="clear-selection" type="button">Limpar seleção</button></div>
+      <button id="download-button" class="primary" type="button"><span aria-hidden="true">↓</span> Baixar ZIP</button>
+    </div>
+
+    <template id="card-template">
+      <article class="card">
+        <button class="card__image" type="button"><img alt="" loading="lazy" /><span class="check">✓</span><span class="badge"></span></button>
+        <div class="card__meta"><p></p><div><span class="dimensions">medindo…</span><a target="_blank" rel="noreferrer">original ↗</a></div></div>
+      </article>
+    </template>
+
+    <script>window.CAPTURA_API_BASE = "https://captura-imagens-api.maiconsantossilvah-captura.workers.dev";</script>
+    <script src="app.js" defer></script>
+  </body>
+</html>
+

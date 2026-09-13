@@ -38,19 +38,29 @@ git push -u origin main
 
 ## Hospedagem
 
-Este projeto **não funciona integralmente no GitHub Pages**, pois o GitHub Pages aceita somente arquivos estáticos. A varredura de páginas, o proxy de miniaturas e a geração do ZIP usam as rotas de servidor em `app/api`.
+O frontend estático está pronto para o GitHub Pages nos arquivos da raiz:
+
+- `index.html`;
+- `styles.css`;
+- `app.js`;
+- `favicon.svg`;
+- `.nojekyll`.
+
+Em **Settings → Pages**, selecione **Deploy from a branch**, a branch `main` e a pasta `/ (root)`.
 
 ### Cloudflare Workers
 
-Depois de autenticar o Wrangler na sua conta Cloudflare:
+O backend já está publicado em:
+
+`https://captura-imagens-api.maiconsantossilvah-captura.workers.dev`
+
+O `index.html` já usa esse endereço. O código da API fica em `worker/worker.js`. Para publicar alterações futuras:
 
 ```bash
-pnpm install
-pnpm build
-pnpm exec wrangler deploy --config dist/server/wrangler.json
+npx wrangler deploy --config worker/wrangler.toml
 ```
 
-Também é possível adaptar o projeto para outro serviço com suporte a funções de servidor. Alguns sites bloqueiam varreduras automáticas ou carregam imagens apenas depois da execução de scripts no navegador.
+O Worker está configurado para aceitar o domínio `https://maiconsantossilvah-dot.github.io`. Se usar um domínio próprio, altere `ALLOWED_ORIGIN` em `worker/wrangler.toml` e publique novamente. Alguns sites bloqueiam varreduras automáticas ou carregam imagens apenas depois da execução de scripts no navegador.
 
 ## Uso responsável
 
