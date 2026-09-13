@@ -179,13 +179,17 @@ function attributes(raw) {
   return output;
 }
 
-function bestSrcset(value) {
+function srcsetCandidates(value) {
   return value.split(",").map((item) => {
     const match = item.trim().match(/^(\S+)(?:\s+(\d+(?:\.\d+)?)(w|x))?$/);
     if (!match) return null;
     const score = match[3] === "x" ? Number(match[2] || 1) * 10_000 : Number(match[2] || 0);
     return { value: match[1], score };
-  }).filter(Boolean).sort((a, b) => b.score - a.score)[0]?.value || "";
+  }).filter(Boolean).sort((a, b) => b.score - a.score);
+}
+
+function bestSrcset(value) {
+  return srcsetCandidates(value)[0]?.value || "";
 }
 
 function resolveImage(value, base) {
@@ -200,12 +204,95 @@ function resolveImage(value, base) {
   }
 }
 
+function imageAttributeCandidates(attrs) {
+  const candidates = [];
+  const add = (value, score) => { if (value) candidates.push({ value, score }); };
+
+  add(attrs["data-orig-file"], 9_000_000);
+  add(attrs["data-original-file"], 9_000_000);
+  add(attrs["data-full"], 8_000_000);
+  add(attrs["data-full-src"], 8_000_000);
+  add(attrs["data-zoom-image"], 8_000_000);
+  add(attrs["data-hires"], 8_000_000);
+
+  for (const candidate of srcsetCandidates(attrs.srcset || "")) add(candidate.value, 2_000_000 + candidate.score);
+  for (const candidate of srcsetCandidates(attrs["data-srcset"] || "")) add(candidate.value, 2_000_000 + candidate.score);
+
+  add(attrs["data-large-file"], 1_500_000);
+  add(attrs["data-original"], 1_000_000);
+  add(attrs["data-lazy-src"], 500_000);
+  add(attrs["data-src"], 400_000);
+  add(attrs.src, 100_000);
+  return candidates.sort((a, b) => b.score - a.score);
+}
+
+function looksLikeImageLink(value, attrs) {
+  try {
+    const url = new URL(value);
+    if (/\.(?:avif|webp|png|jpe?g|gif|svg|bmp|tiff?|ico|heic|heif)$/i.test(url.pathname)) return true;
+    if (/^(?:avif|webp|png|jpe?g|gif|svg|bmp|tiff?|ico|heic|heif)$/i.test(url.searchParams.get("format") || url.searchParams.get("fm") || "")) return true;
+  } catch (_) {
+    return false;
+  }
+  const hint = [attrs.class, attrs.id, attrs.rel, attrs["data-lightbox"], attrs["data-fancybox"]].filter(Boolean).join(" ");
+  return Object.hasOwn(attrs, "download") || /(?:lightbox|fancybox|zoom|full[-_ ]?size)/i.test(hint);
+}
+
+function linkedOriginalsFromHtml(html, base) {
+  const originals = new Map();
+  for (const anchorMatch of html.matchAll(/<a\b([^>]*)>([\s\S]*?)<\/a>/gi)) {
+    const anchorAttrs = attributes(anchorMatch[1]);
+    const originalUrl = resolveImage(anchorAttrs.href || anchorAttrs["data-href"] || "", base);
+    if (!originalUrl || !looksLikeImageLink(originalUrl, anchorAttrs)) continue;
+
+    for (const imageMatch of anchorMatch[2].matchAll(/<(img|source)\b([^>]*)>/gi)) {
+      const imageAttrs = attributes(imageMatch[2]);
+      for (const candidate of imageAttributeCandidates(imageAttrs)) {
+        const thumbnailUrl = resolveImage(candidate.value, base);
+        if (thumbnailUrl && thumbnailUrl !== originalUrl) originals.set(thumbnailUrl, originalUrl);
+      }
+    }
+  }
+  return originals;
+}
+
+function bestImageSource(attrs, base, linkedOriginals) {
+  const candidates = imageAttributeCandidates(attrs);
+  for (const candidate of candidates) {
+    const candidateUrl = resolveImage(candidate.value, base);
+    const linkedOriginal = candidateUrl ? linkedOriginals.get(candidateUrl) : null;
+    if (linkedOriginal) return { value: linkedOriginal, source: "link para imagem original" };
+  }
+  return candidates[0] ? { value: candidates[0].value, source: "maior variante disponível" } : null;
+}
+
+function inferiorImageVariantsFromHtml(html, base, linkedOriginals) {
+  const preferredUrls = new Set();
+  const inferiorUrls = new Set();
+  for (const match of html.matchAll(/<(img|source)\b([^>]*)>/gi)) {
+    const attrs = attributes(match[2]);
+    const preferred = bestImageSource(attrs, base, linkedOriginals);
+    const preferredUrl = preferred ? resolveImage(preferred.value, base) : null;
+    if (preferredUrl) preferredUrls.add(preferredUrl);
+    for (const candidate of imageAttributeCandidates(attrs)) {
+      const candidateUrl = resolveImage(candidate.value, base);
+      if (candidateUrl && candidateUrl !== preferredUrl) inferiorUrls.add(candidateUrl);
+    }
+  }
+  for (const preferredUrl of preferredUrls) inferiorUrls.delete(preferredUrl);
+  return inferiorUrls;
+}
+
 function extractImages(html, base) {
   const found = new Map();
+  const linkedOriginals = linkedOriginalsFromHtml(html, base);
+  const inferiorVariants = inferiorImageVariantsFromHtml(html, base, linkedOriginals);
   const add = (raw, alt, source) => {
-    const url = resolveImage(raw, base);
+    const resolved = resolveImage(raw, base);
+    const url = resolved ? linkedOriginals.get(resolved) || resolved : null;
+    if (resolved === url && inferiorVariants.has(resolved)) return;
     if (!url || found.has(url)) return;
-    found.set(url, { url, alt: htmlDecode(alt).slice(0, 220), source, inline: url.startsWith("data:") });
+    found.set(url, { url, alt: htmlDecode(alt).slice(0, 220), source: url !== resolved ? "link para imagem original" : source, inline: url.startsWith("data:") });
   };
 
   for (const match of html.matchAll(/<(img|source|meta|link|image)\b([^>]*)>/gi)) {
@@ -213,11 +300,11 @@ function extractImages(html, base) {
     const attrs = attributes(match[2]);
     const alt = attrs.alt || attrs.title || "";
     if (tag === "img") {
-      const preferred = attrs["data-original"] || attrs["data-full"] || attrs["data-full-src"] || attrs["data-zoom-image"] || attrs["data-hires"] || bestSrcset(attrs.srcset || attrs["data-srcset"] || "") || attrs["data-lazy-src"] || attrs["data-src"] || attrs.src;
-      if (preferred) add(preferred, alt, "elemento img");
+      const preferred = bestImageSource(attrs, base, linkedOriginals);
+      if (preferred) add(preferred.value, alt, preferred.source);
     } else if (tag === "source") {
-      const preferred = bestSrcset(attrs.srcset || attrs["data-srcset"] || "") || attrs.src;
-      if (preferred) add(preferred, alt, "imagem responsiva");
+      const preferred = bestImageSource(attrs, base, linkedOriginals);
+      if (preferred) add(preferred.value, alt, preferred.source);
     } else if (tag === "meta") {
       const key = (attrs.property || attrs.name || "").toLowerCase();
       if (["og:image", "og:image:url", "twitter:image", "twitter:image:src"].includes(key) && attrs.content) add(attrs.content, attrs["data-alt"] || "Imagem social", "metadado social");
@@ -428,4 +515,3 @@ class ZipWriter {
     this.controller.close();
   }
 }
-
