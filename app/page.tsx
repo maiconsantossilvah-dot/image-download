@@ -9,12 +9,17 @@ import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 
-type FoundImage = { id: string; url: string; alt: string; format: string; source: string; inline: boolean };
+type FoundImage = { id: string; url: string; previewUrl?: string; alt: string; format: string; source: string; inline: boolean; width?: number; height?: number };
 type ScanResult = { pageTitle: string; pageUrl: string; images: FoundImage[]; notice?: string };
 type ImageSize = { width: number; height: number };
 const DEMO_FORMATS = ["JPG", "PNG", "WEBP", "SVG"];
 
 function previewUrl(image: FoundImage) {
+  const url = image.previewUrl || image.url;
+  return image.inline ? url : `/api/image?url=${encodeURIComponent(url)}`;
+}
+
+function fullImageUrl(image: FoundImage) {
   return image.inline ? image.url : `/api/image?url=${encodeURIComponent(image.url)}`;
 }
 
@@ -39,6 +44,7 @@ export default function Home() {
   const [downloading, setDownloading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [format, setFormat] = useState("TODOS");
+  const [viewerIndex, setViewerIndex] = useState<number | null>(null);
   const scanRef = useRef<(value: string) => Promise<ScanResult>>(() => Promise.reject(new Error("Scanner indisponível")));
 
   const runScan = useCallback(async (value = url) => {
@@ -53,6 +59,7 @@ export default function Home() {
     setSelected(new Set());
     setSizes({});
     setFormat("TODOS");
+    setViewerIndex(null);
     const timer = window.setInterval(() => setProgress((current) => Math.min(current + Math.max(2, (88 - current) / 7), 88)), 280);
     try {
       const response = await fetch("/api/scan", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ url: cleanUrl }) });
@@ -71,7 +78,7 @@ export default function Home() {
     }
   }, [url]);
 
-  scanRef.current = runScan;
+  useEffect(() => { scanRef.current = runScan; }, [runScan]);
 
   useEffect(() => {
     const context = (document as Document & { modelContext?: { registerTool: (tool: Record<string, unknown>, options?: { signal?: AbortSignal }) => void | Promise<void> } }).modelContext;
@@ -97,6 +104,18 @@ export default function Home() {
   const formats = useMemo(() => ["TODOS", ...Array.from(new Set(result?.images.map((image) => image.format) || [])).sort()], [result]);
   const visibleImages = useMemo(() => !result ? [] : format === "TODOS" ? result.images : result.images.filter((image) => image.format === format), [format, result]);
   const selectedImages = useMemo(() => result?.images.filter((image) => selected.has(image.id)) || [], [result, selected]);
+  const viewerImage = viewerIndex === null ? null : visibleImages[viewerIndex] || null;
+
+  useEffect(() => {
+    if (viewerIndex === null) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setViewerIndex(null);
+      if (event.key === "ArrowLeft") setViewerIndex((current) => current === null ? null : Math.max(0, current - 1));
+      if (event.key === "ArrowRight") setViewerIndex((current) => current === null ? null : Math.min(visibleImages.length - 1, current + 1));
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [viewerIndex, visibleImages.length]);
 
   const toggleImage = (id: string) => setSelected((current) => {
     const next = new Set(current);
@@ -183,7 +202,7 @@ export default function Home() {
                 {result.notice ? <p className="mt-1 text-sm text-amber-200/75">{result.notice}</p> : null}
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                <label className="relative"><span className="sr-only">Filtrar por formato</span><select className="h-10 appearance-none rounded-lg border border-white/10 bg-[#0c1b17] py-0 pl-3 pr-9 text-sm font-medium text-[#d9e4df] outline-none focus:border-[#b7f35c]/60" value={format} onChange={(event) => setFormat(event.target.value)}>{formats.map((item) => <option key={item}>{item}</option>)}</select><ChevronDown className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-[#71867d]" /></label>
+                <label className="relative"><span className="sr-only">Filtrar por formato</span><select className="h-10 appearance-none rounded-lg border border-white/10 bg-[#0c1b17] py-0 pl-3 pr-9 text-sm font-medium text-[#d9e4df] outline-none focus:border-[#b7f35c]/60" value={format} onChange={(event) => { setFormat(event.target.value); setViewerIndex(null); }}>{formats.map((item) => <option key={item}>{item}</option>)}</select><ChevronDown className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-[#71867d]" /></label>
                 <div className="flex h-10 items-center gap-2 rounded-lg border border-white/10 bg-white/[0.035] px-3 text-sm font-medium text-[#d9e4df] hover:bg-white/[0.08]">
                   <Checkbox id="select-visible" checked={selectedVisible} onCheckedChange={() => toggleVisible()} className="border-[#70857c] data-[state=checked]:border-[#b7f35c] data-[state=checked]:bg-[#b7f35c] data-[state=checked]:text-[#07110f]" />
                   <label className="cursor-pointer select-none" htmlFor="select-visible">{selectedVisible ? "Desmarcar visíveis" : "Selecionar visíveis"}</label>
@@ -192,18 +211,19 @@ export default function Home() {
             </div>
             {visibleImages.length ? (
               <div className="columns-1 gap-4 sm:columns-2 lg:columns-3 xl:columns-4 2xl:columns-5">
-                {visibleImages.map((image) => {
+                {visibleImages.map((image, index) => {
                   const isSelected = selected.has(image.id);
                   const imageSize = sizes[image.id];
                   return (
                     <article key={image.id} className={`group relative mb-4 break-inside-avoid overflow-hidden rounded-2xl border bg-[#0c1b17] transition-all duration-200 ${isSelected ? "border-[#b7f35c] shadow-[0_0_0_1px_#b7f35c,0_14px_40px_rgba(0,0,0,.25)]" : "border-white/10 hover:-translate-y-0.5 hover:border-white/20"}`}>
-                      <button className="relative block w-full cursor-pointer overflow-hidden bg-[#10241e] text-left" type="button" aria-pressed={isSelected} aria-label={`${isSelected ? "Desmarcar" : "Selecionar"} ${image.alt || "imagem"}`} onClick={() => toggleImage(image.id)}>
+                      <button className="relative block w-full cursor-pointer overflow-hidden bg-[#10241e] text-left" type="button" aria-label={`Ampliar ${image.alt || "imagem"}`} onClick={() => setViewerIndex(index)}>
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img src={previewUrl(image)} alt={image.alt || "Miniatura encontrada na página"} className="max-h-[390px] min-h-44 w-full object-contain transition duration-300 group-hover:scale-[1.015]" loading="lazy" onLoad={(event) => { const target = event.currentTarget; setSizes((current) => ({ ...current, [image.id]: { width: target.naturalWidth, height: target.naturalHeight } })); }} />
-                        <span className={`absolute left-3 top-3 grid size-8 place-items-center rounded-full border backdrop-blur-md transition ${isSelected ? "border-[#b7f35c] bg-[#b7f35c] text-[#07110f]" : "border-white/25 bg-[#07110f]/60 text-transparent group-hover:text-white"}`}><Check className="size-4" strokeWidth={3} /></span>
+                        <span className="absolute bottom-3 left-3 rounded-md bg-[#07110f]/75 px-2 py-1 text-xs text-white opacity-0 transition group-hover:opacity-100 group-focus-within:opacity-100">Ampliar ↗</span>
                         <span className="absolute right-3 top-3 rounded-md border border-white/15 bg-[#07110f]/70 px-2 py-1 text-[11px] font-bold text-white backdrop-blur-md">{image.format}</span>
                       </button>
-                      <div className="p-3.5"><p className="truncate text-sm font-medium text-[#e9f1ed]" title={image.alt || fileName(image, 0)}>{image.alt || fileName(image, 0)}</p><div className="mt-2 flex items-center justify-between gap-3 text-xs text-[#71867d]"><span>{imageSize ? `${imageSize.width} × ${imageSize.height}` : "medindo…"}</span>{!image.inline ? <a href={image.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 hover:text-[#b7f35c]" onClick={(event) => event.stopPropagation()}>original <ExternalLink className="size-3" /></a> : <span>incorporada</span>}</div></div>
+                      <button className={`absolute left-3 top-3 grid size-9 place-items-center rounded-full border backdrop-blur-md transition ${isSelected ? "border-[#b7f35c] bg-[#b7f35c] text-[#07110f]" : "border-white/25 bg-[#07110f]/80 text-transparent hover:text-white"}`} type="button" aria-pressed={isSelected} aria-label={`${isSelected ? "Desmarcar" : "Selecionar"} ${image.alt || "imagem"}`} onClick={() => toggleImage(image.id)}><Check className="size-4" strokeWidth={3} /></button>
+                      <div className="p-3.5"><p className="truncate text-sm font-medium text-[#e9f1ed]" title={image.alt || fileName(image, index)}>{image.alt || fileName(image, index)}</p><div className="mt-2 flex items-center justify-between gap-3 text-xs text-[#71867d]"><span>{image.width && image.height ? `${image.width} × ${image.height}` : imageSize ? `${imageSize.width} × ${imageSize.height}` : "medindo…"}</span>{!image.inline ? <a href={image.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 hover:text-[#b7f35c]" onClick={(event) => event.stopPropagation()}>original <ExternalLink className="size-3" /></a> : <span>incorporada</span>}</div></div>
                     </article>
                   );
                 })}
@@ -214,6 +234,7 @@ export default function Home() {
       </section>
 
       {selected.size > 0 ? <div className="fixed inset-x-0 bottom-4 z-50 mx-auto flex w-[calc(100%-24px)] max-w-xl items-center justify-between gap-4 rounded-2xl border border-white/15 bg-[#11231e]/95 p-3 pl-4 shadow-[0_20px_70px_rgba(0,0,0,.55)] backdrop-blur-xl"><div className="min-w-0"><p className="font-semibold text-white">{selected.size} {selected.size === 1 ? "selecionada" : "selecionadas"}</p><button className="text-xs text-[#8ea39b] hover:text-white" onClick={() => setSelected(new Set())}>Limpar seleção</button></div><Button className="h-12 rounded-xl bg-[#b7f35c] px-5 font-bold text-[#07110f] hover:bg-[#c8ff77]" disabled={downloading} onClick={() => void downloadSelected()}>{downloading ? <LoaderCircle className="animate-spin" /> : <Download />}Baixar ZIP</Button></div> : null}
+      {viewerImage ? <div className="fixed inset-0 z-[60] grid place-items-center bg-black/85 p-2 backdrop-blur-sm sm:p-5" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setViewerIndex(null); }}><div className="flex max-h-[calc(100vh-16px)] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-white/20 bg-[#0c1b17] shadow-2xl sm:max-h-[calc(100vh-40px)]" role="dialog" aria-modal="true" aria-label={`Visualizar ${viewerImage.alt}`}><div className="flex items-center justify-between gap-4 border-b border-white/10 p-3 sm:p-4"><div className="min-w-0"><strong className="block truncate text-sm">{viewerImage.alt || fileName(viewerImage, viewerIndex || 0)}</strong><span className="text-xs text-[#8ea39b]">{(viewerIndex || 0) + 1} de {visibleImages.length}</span></div><button className="grid size-9 shrink-0 place-items-center rounded-lg bg-white/10 text-xl" type="button" aria-label="Fechar visualização" onClick={() => setViewerIndex(null)}>×</button></div><div className="flex min-h-0 flex-1 items-center justify-between gap-1 bg-[#07110f] p-2"><button className="h-12 w-8 shrink-0 rounded-lg border border-white/15 text-2xl disabled:opacity-30 sm:w-11" type="button" aria-label="Imagem anterior" disabled={viewerIndex === 0} onClick={() => setViewerIndex((current) => current === null ? null : current - 1)}>‹</button>{/* eslint-disable-next-line @next/next/no-img-element */}<img className="max-h-[72vh] min-h-0 w-[calc(100%-80px)] object-contain" src={fullImageUrl(viewerImage)} alt={viewerImage.alt} /><button className="h-12 w-8 shrink-0 rounded-lg border border-white/15 text-2xl disabled:opacity-30 sm:w-11" type="button" aria-label="Próxima imagem" disabled={viewerIndex === visibleImages.length - 1} onClick={() => setViewerIndex((current) => current === null ? null : current + 1)}>›</button></div><div className="flex flex-wrap items-center justify-between gap-3 border-t border-white/10 p-3 sm:p-4"><span className="text-xs text-[#8ea39b]">{viewerImage.format}{viewerImage.width && viewerImage.height ? ` · ${viewerImage.width} × ${viewerImage.height} px` : ""}</span><div className="flex items-center gap-3"><a className="text-xs text-[#b4c2bc]" href={viewerImage.url} target="_blank" rel="noreferrer">Abrir arquivo ↗</a><Button className="bg-[#b7f35c] font-bold text-[#07110f] hover:bg-[#c8ff77]" onClick={() => toggleImage(viewerImage.id)}>{selected.has(viewerImage.id) ? "✓ Selecionada" : "Selecionar imagem"}</Button></div></div></div></div> : null}
     </main>
   );
 }

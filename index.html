@@ -3,83 +3,152 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="Encontre, selecione e baixe imagens de páginas públicas." />
-    <meta name="theme-color" content="#07110f" />
-    <title>Captura — Scanner de imagens</title>
+    <meta name="description" content="Encontre e baixe imagens de páginas públicas na maior qualidade disponível." />
+    <meta name="theme-color" content="#08110f" />
+    <title>Captura — Baixe imagens em alta qualidade</title>
     <link rel="icon" href="favicon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <header class="topbar">
-      <div class="topbar__inner">
+    <header class="app-header">
+      <div class="shell app-header__inner">
         <a class="brand" href="./" aria-label="Captura — página inicial">
-          <span class="brand__icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24"><path d="M4 8V4h4M16 4h4v4M20 16v4h-4M8 20H4v-4M9 12h6"/></svg>
+          <span class="brand__mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3M9 12h6"/></svg>
           </span>
-          <span><strong>CAPTURA</strong><small>scanner de imagens</small></span>
+          <span class="brand__text"><strong>Captura</strong><small>Imagens em alta qualidade</small></span>
         </a>
-        <span class="safe"><span aria-hidden="true">✓</span> Acesso apenas a páginas públicas</span>
+        <div class="app-header__status">
+          <span class="status-dot" aria-hidden="true"></span>
+          <span>Pronto para usar</span>
+        </div>
       </div>
     </header>
 
     <main>
       <section class="hero">
-        <div class="hero__inner">
-          <div class="hero__copy">
-            <p class="eyebrow">✦ Alta qualidade, em um só lugar</p>
-            <h1>Encontre cada imagem.<br><span>Baixe só o que importa.</span></h1>
+        <div class="shell hero__inner">
+          <div class="hero__content">
+            <div class="hero__eyebrow"><span aria-hidden="true">✦</span> Scanner de imagens online</div>
+            <h1>Encontre a imagem certa.<br><span>Baixe na melhor qualidade.</span></h1>
+            <p class="hero__lead">Cole o endereço de uma página pública. O Captura procura versões originais, imagens responsivas e arquivos escondidos no código.</p>
           </div>
-          <p class="hero__note">O scanner procura imagens comuns, versões responsivas, metadados sociais e fundos definidos no código da página.</p>
 
-          <form id="scan-form" class="scanner">
-            <label class="scanner__input">
-              <span class="sr-only">Endereço da página</span>
-              <svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>
-              <input id="url" type="url" inputmode="url" autocomplete="url" placeholder="Cole o link da página — exemplo.com/galeria" required />
-            </label>
-            <button id="scan-button" class="primary" type="submit">
-              <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 8V4h4M16 4h4v4M20 16v4h-4M8 20H4v-4M9 12h6"/></svg>
-              <span>Varrer página</span>
-            </button>
+          <form id="scan-form" class="url-panel">
+            <label class="url-panel__label" for="url">Endereço da página</label>
+            <div class="url-panel__controls">
+              <div class="url-field">
+                <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M10.5 13.5a4.2 4.2 0 0 0 6 0l2-2a4.2 4.2 0 0 0-6-6l-1.1 1.1M13.5 10.5a4.2 4.2 0 0 0-6 0l-2 2a4.2 4.2 0 0 0 6 6l1.1-1.1"/></svg>
+                <input id="url" type="text" inputmode="url" autocomplete="url" spellcheck="false" placeholder="exemplo.com/galeria" aria-describedby="url-hint" required />
+                <button id="clear-url" class="clear-url" type="button" aria-label="Limpar endereço" title="Limpar endereço" hidden>×</button>
+              </div>
+              <button id="scan-button" class="button button--primary" type="submit">
+                <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3M9 12h6"/></svg>
+                <span>Buscar imagens</span>
+              </button>
+            </div>
+            <p id="url-hint" class="url-panel__hint"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/><path d="m9 12 2 2 4-4"/></svg>Somente páginas públicas. Nenhum dado é salvo.</p>
+
+            <div id="progress-wrap" class="scan-progress" hidden>
+              <div class="scan-progress__top"><span>Procurando as melhores versões…</span><output id="progress-text">0%</output></div>
+              <div class="scan-progress__track"><span id="progress"></span></div>
+            </div>
           </form>
-          <div id="progress-wrap" class="progress-wrap" hidden><div class="progress"><span id="progress"></span></div><output id="progress-text">0%</output></div>
+
+          <ol class="steps" aria-label="Como funciona">
+            <li><span>1</span><div><strong>Cole o link</strong><small>Informe uma página pública</small></div></li>
+            <li><span>2</span><div><strong>Escolha as imagens</strong><small>Confira tamanho e formato</small></div></li>
+            <li><span>3</span><div><strong>Baixe o ZIP</strong><small>Receba tudo de uma vez</small></div></li>
+          </ol>
         </div>
       </section>
 
-      <section class="workspace" aria-live="polite">
-        <div id="status" class="status" role="status"></div>
-        <div id="empty" class="empty">
-          <div class="empty__copy">
-            <span class="empty__icon" aria-hidden="true">▧</span>
-            <h2>Sua galeria aparece aqui</h2>
-            <p>Cole o link de uma página pública. Depois, marque as miniaturas que quiser e receba tudo em um único arquivo ZIP.</p>
-            <div class="formats"><span>JPG</span><span>PNG</span><span>WEBP</span><span>SVG</span><span>+ outros</span></div>
-          </div>
-          <div class="empty__art" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><b></b></div>
+      <section class="shell workspace" aria-live="polite">
+        <div id="status" class="notice" role="status" hidden>
+          <span class="notice__icon" aria-hidden="true">!</span>
+          <span id="status-text"></span>
+          <button id="close-status" type="button" aria-label="Fechar aviso">×</button>
         </div>
 
-        <div id="results" hidden>
-          <div class="toolbar">
-            <div><h2><span id="count">0</span> <span id="count-label">imagens</span></h2><p id="source-host"></p></div>
-            <div class="toolbar__actions">
-              <label class="select-wrap"><span class="sr-only">Filtrar por formato</span><select id="format"><option value="TODOS">TODOS</option></select></label>
-              <label class="select-all"><input id="select-all" type="checkbox" /><span>Selecionar visíveis</span></label>
+        <div id="empty" class="empty-state">
+          <div class="empty-state__visual" aria-hidden="true">
+            <div class="preview-stack"><i></i><i></i><i></i><span>+</span></div>
+          </div>
+          <div class="empty-state__content">
+            <span class="section-label">Sua galeria</span>
+            <h2>As imagens encontradas aparecerão aqui</h2>
+            <p>Abra uma imagem para vê-la em tamanho maior. Marque as que quiser baixar e receba os arquivos em um ZIP.</p>
+            <div class="format-list"><span>JPG</span><span>PNG</span><span>WEBP</span><span>SVG</span><span>AVIF</span></div>
+          </div>
+        </div>
+
+        <div id="results" class="results" hidden>
+          <div class="results__heading">
+            <div>
+              <span class="section-label">Resultados</span>
+              <h2><span id="count">0</span> <span id="count-label">imagens encontradas</span></h2>
+              <p id="source-host"></p>
+            </div>
+            <div class="results__actions">
+              <label class="filter-control">
+                <span>Formato</span>
+                <select id="format"><option value="TODOS">Todos</option></select>
+              </label>
+              <label class="select-control">
+                <input id="select-all" type="checkbox" />
+                <span>Selecionar visíveis</span>
+              </label>
             </div>
           </div>
+
           <div id="gallery" class="gallery"></div>
+          <div id="no-matches" class="no-matches" hidden><strong>Nenhuma imagem neste formato</strong><span>Escolha outro formato para continuar.</span></div>
         </div>
       </section>
     </main>
 
-    <div id="download-bar" class="download-bar" hidden>
-      <div><strong id="selected-count">0 selecionadas</strong><button id="clear-selection" type="button">Limpar seleção</button></div>
-      <button id="download-button" class="primary" type="button"><span aria-hidden="true">↓</span> Baixar ZIP</button>
-    </div>
+    <aside id="download-bar" class="selection-bar" aria-label="Resumo da seleção" hidden>
+      <div class="selection-bar__summary">
+        <span class="selection-bar__icon" aria-hidden="true">✓</span>
+        <div><strong id="selected-count">0 imagens selecionadas</strong><button id="clear-selection" type="button">Limpar seleção</button></div>
+      </div>
+      <button id="download-button" class="button button--primary" type="button">
+        <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 3v12m0 0 5-5m-5 5-5-5M5 21h14"/></svg>
+        <span>Baixar ZIP</span>
+      </button>
+    </aside>
+
+    <footer class="footer"><div class="shell"><span>Captura</span><p>Use somente imagens que você tenha permissão para baixar.</p></div></footer>
+
+    <dialog id="viewer" class="viewer" aria-labelledby="viewer-title">
+      <div class="viewer__header">
+        <div><strong id="viewer-title">Visualizar imagem</strong><span id="viewer-position"></span></div>
+        <button id="viewer-close" class="viewer__icon-button" type="button" aria-label="Fechar visualização">×</button>
+      </div>
+      <div class="viewer__stage">
+        <button id="viewer-prev" class="viewer__nav" type="button" aria-label="Imagem anterior">‹</button>
+        <img id="viewer-image" alt="" />
+        <button id="viewer-next" class="viewer__nav" type="button" aria-label="Próxima imagem">›</button>
+      </div>
+      <div class="viewer__footer">
+        <div class="viewer__details"><strong id="viewer-name"></strong><span id="viewer-details"></span></div>
+        <div class="viewer__actions"><a id="viewer-original" target="_blank" rel="noreferrer">Abrir arquivo ↗</a><button id="viewer-select" class="button button--primary" type="button">Selecionar imagem</button></div>
+      </div>
+    </dialog>
 
     <template id="card-template">
-      <article class="card">
-        <button class="card__image" type="button"><img alt="" loading="lazy" /><span class="check">✓</span><span class="badge"></span></button>
-        <div class="card__meta"><p></p><div><span class="dimensions">medindo…</span><a target="_blank" rel="noreferrer">original ↗</a></div></div>
+      <article class="image-card">
+        <button class="image-card__preview" type="button">
+          <img alt="" loading="lazy" />
+          <span class="image-card__zoom" aria-hidden="true">Ampliar ↗</span>
+          <span class="image-card__format"></span>
+          <span class="image-card__quality" hidden>Arquivo original</span>
+        </button>
+        <button class="image-card__select" type="button"><span class="image-card__check" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m6 12 4 4 8-8"/></svg></span><span class="sr-only">Selecionar imagem</span></button>
+        <div class="image-card__body">
+          <p class="image-card__title"></p>
+          <div class="image-card__meta"><span class="dimensions">Verificando tamanho…</span><a target="_blank" rel="noreferrer" aria-label="Abrir imagem original">Abrir <span aria-hidden="true">↗</span></a></div>
+        </div>
       </article>
     </template>
 
@@ -87,4 +156,3 @@
     <script src="app.js" defer></script>
   </body>
 </html>
-

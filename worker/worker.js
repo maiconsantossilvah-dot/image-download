@@ -78,6 +78,8 @@ async function scan(request) {
   const body = await request.json();
   if (typeof body.url !== "string") return json({ error: "Informe uma URL válida." }, 400);
   const initial = normalizePageUrl(body.url);
+  const galleryId = nhentaiGalleryId(initial);
+  if (galleryId) return json(await scanNhentaiGallery(galleryId, initial));
   const { response, finalUrl } = await safeFetch(initial, {
     headers: { accept: "text/html,application/xhtml+xml;q=0.9,*/*;q=0.7" },
   });
@@ -100,6 +102,46 @@ async function scan(request) {
     images,
     notice: extracted.length >= 600 ? "A página contém muitas imagens; mostramos as primeiras 600." : undefined,
   });
+}
+
+function nhentaiGalleryId(url) {
+  if (!/^(?:www\.)?nhentai\.net$/i.test(url.hostname)) return null;
+  return url.pathname.match(/^\/g\/(\d+)\/?$/)?.[1] || null;
+}
+
+async function scanNhentaiGallery(id, pageUrl) {
+  const endpoint = new URL(`https://nhentai.net/api/v2/galleries/${id}`);
+  const { response } = await safeFetch(endpoint, { headers: { accept: "application/json" } });
+  if (!response.ok) throw new Error(`A galeria respondeu com o erro ${response.status}.`);
+  const gallery = await response.json();
+  const mediaId = String(gallery.media_id || "");
+  if (!/^\d+$/.test(mediaId) || !Array.isArray(gallery.pages)) throw new Error("A galeria não retornou uma lista de páginas válida.");
+  const fullPath = new RegExp(`^galleries/${mediaId}/[0-9]+\\.(?:jpe?g|png|webp|gif|avif)(?:\\.webp)?$`, "i");
+  const thumbnailPath = new RegExp(`^galleries/${mediaId}/[0-9]+t\\.(?:jpe?g|png|webp|gif|avif)(?:\\.webp)?$`, "i");
+  const images = gallery.pages.slice(0, 600).map((page, index) => {
+    const path = String(page.path || "");
+    const thumbnail = String(page.thumbnail || "");
+    if (!fullPath.test(path)) return null;
+    const number = Number(page.number) || index + 1;
+    const url = `https://i.nhentai.net/${path}`;
+    return {
+      id: `img-${number}-${simpleHash(url)}`,
+      url,
+      previewUrl: thumbnailPath.test(thumbnail) ? `https://t.nhentai.net/${thumbnail}` : url,
+      alt: `Página ${number}`,
+      source: "arquivo original da galeria",
+      format: formatFromUrl(url),
+      width: Number(page.width) || null,
+      height: Number(page.height) || null,
+      inline: false,
+    };
+  }).filter(Boolean);
+  return {
+    pageTitle: htmlDecode(String(gallery.title?.english || gallery.title?.japanese || `Galeria ${id}`)).slice(0, 180),
+    pageUrl: pageUrl.href,
+    images,
+    notice: gallery.pages.length > 600 ? "A galeria contém muitas imagens; mostramos as primeiras 600." : undefined,
+  };
 }
 
 async function proxyImage(request) {

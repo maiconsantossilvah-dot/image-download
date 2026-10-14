@@ -6,8 +6,9 @@ Aplicativo para analisar páginas públicas, exibir miniaturas das imagens encon
 
 - encontra imagens em `img`, `picture`, `srcset`, metadados sociais e CSS;
 - prioriza a maior variante informada pela página;
-- mostra miniaturas, formato e dimensões;
-- permite filtrar e selecionar imagens;
+- para galerias `nhentai.net/g/...`, consulta a API v2 da galeria e usa os arquivos das páginas em resolução original, separados das miniaturas;
+- mostra miniaturas, formato e dimensões do arquivo selecionado;
+- permite ampliar, navegar entre imagens, filtrar e selecionar para download;
 - gera um ZIP com os arquivos selecionados;
 - bloqueia tentativas de acesso a endereços locais e privados.
 
@@ -61,6 +62,8 @@ npx wrangler deploy --config worker/wrangler.toml
 ```
 
 O Worker está configurado para aceitar o domínio `https://maiconsantossilvah-dot.github.io`. Se usar um domínio próprio, altere `ALLOWED_ORIGIN` em `worker/wrangler.toml` e publique novamente. Alguns sites bloqueiam varreduras automáticas ou carregam imagens apenas depois da execução de scripts no navegador.
+
+Para disponibilizar mudanças neste repositório, publique o frontend no GitHub Pages e execute novamente o deploy do Worker. A versão local do scanner de galerias também fica em `app/api/scan/route.ts` para quem roda a aplicação com `pnpm dev`.
 
 ## Uso responsável
 

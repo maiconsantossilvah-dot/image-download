@@ -34,6 +34,49 @@ function resolveImage(value: string, base: URL) {
   } catch { return null; }
 }
 
+function nhentaiGalleryId(url: URL) {
+  if (!/^(?:www\.)?nhentai\.net$/i.test(url.hostname)) return null;
+  return url.pathname.match(/^\/g\/(\d+)\/?$/)?.[1] || null;
+}
+
+async function scanNhentaiGallery(id: string, pageUrl: URL) {
+  const { response } = await safeFetch(new URL(`https://nhentai.net/api/v2/galleries/${id}`), { headers: { accept: "application/json" } });
+  if (!response.ok) throw new Error(`A galeria respondeu com o erro ${response.status}.`);
+  const gallery = await response.json() as {
+    media_id?: unknown;
+    pages?: Array<{ number?: number; path?: string; thumbnail?: string; width?: number; height?: number }>;
+    title?: { english?: string; japanese?: string };
+  };
+  const mediaId = String(gallery.media_id || "");
+  if (!/^\d+$/.test(mediaId) || !Array.isArray(gallery.pages)) throw new Error("A galeria não retornou uma lista de páginas válida.");
+  const fullPath = new RegExp(`^galleries/${mediaId}/[0-9]+\\.(?:jpe?g|png|webp|gif|avif)(?:\\.webp)?$`, "i");
+  const thumbnailPath = new RegExp(`^galleries/${mediaId}/[0-9]+t\\.(?:jpe?g|png|webp|gif|avif)(?:\\.webp)?$`, "i");
+  const images = gallery.pages.slice(0, 600).map((page, index) => {
+    const path = String(page.path || "");
+    const thumbnail = String(page.thumbnail || "");
+    if (!fullPath.test(path)) return null;
+    const number = Number(page.number) || index + 1;
+    const url = `https://i.nhentai.net/${path}`;
+    return {
+      id: `img-${number}-${simpleHash(url)}`,
+      url,
+      previewUrl: thumbnailPath.test(thumbnail) ? `https://t.nhentai.net/${thumbnail}` : url,
+      alt: `Página ${number}`,
+      source: "arquivo original da galeria",
+      format: formatFromUrl(url),
+      width: Number(page.width) || null,
+      height: Number(page.height) || null,
+      inline: false,
+    };
+  }).filter((item): item is NonNullable<typeof item> => Boolean(item));
+  return {
+    pageTitle: htmlDecode(String(gallery.title?.english || gallery.title?.japanese || `Galeria ${id}`)).slice(0, 180),
+    pageUrl: pageUrl.href,
+    images,
+    notice: gallery.pages.length > 600 ? "A galeria contém muitas imagens; mostramos as primeiras 600." : undefined,
+  };
+}
+
 function extractImages(html: string, base: URL) {
   const found = new Map<string, Found>();
   const add = (raw: string, alt: string, source: string) => {
@@ -96,6 +139,8 @@ export async function POST(request: Request) {
     const body = await request.json() as { url?: unknown };
     if (typeof body.url !== "string") return Response.json({ error: "Informe uma URL válida." }, { status: 400 });
     const initial = normalizePageUrl(body.url);
+    const galleryId = nhentaiGalleryId(initial);
+    if (galleryId) return Response.json(await scanNhentaiGallery(galleryId, initial), { headers: { "cache-control": "no-store" } });
     const { response, finalUrl } = await safeFetch(initial, { headers: { accept: "text/html,application/xhtml+xml;q=0.9,*/*;q=0.7" } });
     if (!response.ok) throw new Error(`O site respondeu com o erro ${response.status}.`);
     const contentType = response.headers.get("content-type") || "";
