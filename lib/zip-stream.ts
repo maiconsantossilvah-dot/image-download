@@ -29,7 +29,17 @@ function updateCrc(current: number, chunk: Uint8Array) {
 export function safeFileName(value: string, index: number) {
   const fallback = `imagem-${String(index + 1).padStart(3, "0")}`;
   const clean = value.normalize("NFKC").replace(/[\\/:*?"<>|\u0000-\u001f]/g, "-").replace(/\s+/g, " ").replace(/^\.+|\.+$/g, "").trim();
-  return `${String(index + 1).padStart(3, "0")}-${(clean || fallback).slice(-150)}`;
+  return (clean || fallback).slice(-150);
+}
+
+export function uniqueFileName(name: string, usedNames: Set<string>) {
+  const match = name.match(/^(.*?)(\.[^.]+)?$/)!;
+  const base = match[1];
+  const extension = match[2] || "";
+  let unique = name;
+  for (let suffix = 2; usedNames.has(unique.toLowerCase()); suffix += 1) unique = `${base} (${suffix})${extension}`;
+  usedNames.add(unique.toLowerCase());
+  return unique;
 }
 
 export function createZipStream(produce: (writer: ZipWriter) => Promise<void>) {

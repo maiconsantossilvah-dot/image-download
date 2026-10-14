@@ -174,13 +174,14 @@ async function bundle(request) {
 
   const stream = createZipStream(async (zip) => {
     const failures = [];
+    const usedNames = new Set();
     for (let index = 0; index < items.length; index += 1) {
       const item = items[index];
       const url = item.url;
       try {
         if (url.startsWith("data:image/")) {
           const inline = decodeInlineImage(url);
-          const name = withExtension(safeFileName(typeof item.name === "string" ? item.name : "imagem", index), inline.contentType, url);
+          const name = uniqueFileName(withExtension(safeFileName(typeof item.name === "string" ? item.name : "imagem", index), inline.contentType, url), usedNames);
           await zip.add(name, inline.bytes);
           continue;
         }
@@ -189,7 +190,7 @@ async function bundle(request) {
         const length = Number(response.headers.get("content-length") || 0);
         if (!response.ok || !response.body || !contentType.toLowerCase().startsWith("image/")) throw new Error("não retornou uma imagem");
         if (length > 100_000_000) throw new Error("arquivo maior que 100 MB");
-        const name = withExtension(safeFileName(typeof item.name === "string" ? item.name : "imagem", index), contentType, url);
+        const name = uniqueFileName(withExtension(safeFileName(typeof item.name === "string" ? item.name : "imagem", index), contentType, url), usedNames);
         await zip.add(name, response.body);
       } catch (error) {
         failures.push(`${index + 1}. ${url.slice(0, 240)} — ${messageOf(error, "falha no download")}`);
@@ -474,7 +475,17 @@ function withExtension(name, contentType, url) {
 function safeFileName(value, index) {
   const fallback = `imagem-${String(index + 1).padStart(3, "0")}`;
   const clean = value.normalize("NFKC").replace(/[\\/:*?"<>|\u0000-\u001f]/g, "-").replace(/\s+/g, " ").replace(/^\.+|\.+$/g, "").trim();
-  return `${String(index + 1).padStart(3, "0")}-${(clean || fallback).slice(-150)}`;
+  return (clean || fallback).slice(-150);
+}
+
+function uniqueFileName(name, usedNames) {
+  const match = name.match(/^(.*?)(\.[^.]+)?$/);
+  const base = match[1];
+  const extension = match[2] || "";
+  let unique = name;
+  for (let suffix = 2; usedNames.has(unique.toLowerCase()); suffix += 1) unique = `${base} (${suffix})${extension}`;
+  usedNames.add(unique.toLowerCase());
+  return unique;
 }
 
 function simpleHash(value) {

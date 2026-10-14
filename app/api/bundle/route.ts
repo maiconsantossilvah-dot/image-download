@@ -1,5 +1,5 @@
 import { assertPublicUrl, decodeInlineImage, formatFromUrl, safeFetch } from "@/lib/web-security";
-import { createZipStream, safeFileName } from "@/lib/zip-stream";
+import { createZipStream, safeFileName, uniqueFileName } from "@/lib/zip-stream";
 
 export const runtime = "edge";
 
@@ -27,13 +27,14 @@ export async function POST(request: Request) {
 
     const stream = createZipStream(async (zip) => {
       const failures: string[] = [];
+      const usedNames = new Set<string>();
       for (let index = 0; index < items.length; index += 1) {
         const item = items[index];
         const url = item.url as string;
         try {
           if (url.startsWith("data:image/")) {
             const inline = decodeInlineImage(url);
-            const name = withExtension(safeFileName(typeof item.name === "string" ? item.name : "imagem", index), inline.contentType, url);
+            const name = uniqueFileName(withExtension(safeFileName(typeof item.name === "string" ? item.name : "imagem", index), inline.contentType, url), usedNames);
             await zip.add(name, inline.bytes);
             continue;
           }
@@ -42,7 +43,7 @@ export async function POST(request: Request) {
           const length = Number(response.headers.get("content-length") || 0);
           if (!response.ok || !response.body || !contentType.toLowerCase().startsWith("image/")) throw new Error("não retornou uma imagem");
           if (length > 100_000_000) throw new Error("arquivo maior que 100 MB");
-          const name = withExtension(safeFileName(typeof item.name === "string" ? item.name : "imagem", index), contentType, url);
+          const name = uniqueFileName(withExtension(safeFileName(typeof item.name === "string" ? item.name : "imagem", index), contentType, url), usedNames);
           await zip.add(name, response.body);
         } catch (error) {
           failures.push(`${index + 1}. ${url.slice(0, 240)} — ${error instanceof Error ? error.message : "falha no download"}`);
