@@ -1,3 +1,5 @@
+import { mergeZipParts, splitZipBatches, ZIP_BATCH_SIZE } from "./lib/zip-batches.js";
+
 (function () {
   "use strict";
 
@@ -324,14 +326,23 @@
     const label = elements.downloadButton.querySelector("span");
     label.textContent = "Preparando ZIP…";
     try {
-      const items = state.images.filter((item) => state.selected.has(item.id)).map((item, index) => ({
+      const selected = state.images.filter((item) => state.selected.has(item.id));
+      const items = selected.map((item, index) => ({
         url: item.url,
-        name: displayName(item, index),
+        name: selected.length > ZIP_BATCH_SIZE ? `${String(index + 1).padStart(4, "0")}-${displayName(item, index)}` : displayName(item, index),
       }));
-      const blob = await fetchZipWithRetry(items, (attempt, total) => {
-        label.textContent = `Tentativa ${attempt} de ${total}…`;
-        showStatus(`Download interrompido. Tentando novamente (${attempt}/${total})…`, "info");
-      });
+      const batches = splitZipBatches(items);
+      const parts = [];
+      for (let index = 0; index < batches.length; index++) {
+        if (batches.length > 1) label.textContent = `Preparando parte ${index + 1}/${batches.length}…`;
+        parts.push(await fetchZipWithRetry(batches[index], (attempt, total) => {
+          label.textContent = `Tentativa ${attempt} de ${total}…`;
+          showStatus(`Parte ${index + 1}/${batches.length} interrompida. Tentando novamente (${attempt}/${total})…`, "info");
+        }));
+      }
+      label.textContent = "Juntando ZIP…";
+      const blob = await mergeZipParts(parts);
+      await verifyZip(blob);
       const href = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = href;

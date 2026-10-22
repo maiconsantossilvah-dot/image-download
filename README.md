@@ -66,7 +66,9 @@ npx wrangler deploy --config worker/wrangler.toml
 
 O Worker está configurado para aceitar o domínio `https://maiconsantossilvah-dot.github.io`. Se usar um domínio próprio, altere `ALLOWED_ORIGIN` em `worker/wrangler.toml` e publique novamente. Alguns sites bloqueiam varreduras automáticas ou carregam imagens apenas depois da execução de scripts no navegador.
 
-Para disponibilizar mudanças neste repositório, publique o frontend no GitHub Pages e execute novamente o deploy do Worker. A versão local do scanner de galerias também fica em `app/api/scan/route.ts` para quem roda a aplicação com `pnpm dev`.
+No plano gratuito, o Cloudflare Workers permite até [50 subrequisições externas por execução](https://developers.cloudflare.com/workers/platform/limits/#subrequests). Como cada imagem pode passar por redirecionamentos, a interface envia lotes de até 8 imagens ao Worker e reúne os resultados em um único ZIP no navegador.
+
+Para disponibilizar mudanças no frontend, publique a branch `main` no GitHub Pages. Execute novamente o deploy do Worker somente quando alterar `worker/`. A versão local do scanner de galerias também fica em `app/api/scan/route.ts` para quem roda a aplicação com `pnpm dev`.
 
 ### Listagens do Rule34
 

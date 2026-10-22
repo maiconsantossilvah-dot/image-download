@@ -8,6 +8,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
+import { mergeZipParts, splitZipBatches, ZIP_BATCH_SIZE } from "@/lib/zip-batches";
 
 type FoundImage = { id: string; url: string; previewUrl?: string; alt: string; format: string; source: string; inline: boolean; width?: number; height?: number };
 type ScanResult = { pageTitle: string; pageUrl: string; images: FoundImage[]; notice?: string };
@@ -178,10 +179,22 @@ export default function Home() {
     setDownloading(true);
     const toastId = toast.loading("Preparando seu arquivo ZIP…");
     try {
-      const body = JSON.stringify({ pageUrl: result?.pageUrl, items: selectedImages.map((image, index) => ({ url: image.url, name: fileName(image, index) })) });
-      const blob = await fetchZipWithRetry(body, (attempt, total) => {
-        toast.loading(`Download interrompido. Tentativa ${attempt} de ${total}…`, { id: toastId });
-      });
+      const items = selectedImages.map((image, index) => ({
+        url: image.url,
+        name: selectedImages.length > ZIP_BATCH_SIZE ? `${String(index + 1).padStart(4, "0")}-${fileName(image, index)}` : fileName(image, index),
+      }));
+      const batches = splitZipBatches(items);
+      const parts: Blob[] = [];
+      for (let index = 0; index < batches.length; index++) {
+        if (batches.length > 1) toast.loading(`Preparando parte ${index + 1} de ${batches.length}…`, { id: toastId });
+        const body = JSON.stringify({ pageUrl: result?.pageUrl, items: batches[index] });
+        parts.push(await fetchZipWithRetry(body, (attempt, total) => {
+          toast.loading(`Parte ${index + 1}/${batches.length} interrompida. Tentativa ${attempt} de ${total}…`, { id: toastId });
+        }));
+      }
+      if (parts.length > 1) toast.loading("Juntando as partes do ZIP…", { id: toastId });
+      const blob = await mergeZipParts(parts);
+      await verifyZip(blob);
       const href = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
       anchor.href = href;
