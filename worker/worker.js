@@ -197,7 +197,8 @@ async function scan3HentaiGallery(id, pageUrl) {
   try { reader = JSON.parse(atob(encoded)); }
   catch { throw new Error("A lista de páginas da galeria é inválida."); }
   const template = assertPublicUrl(String(reader.baseUriImg || ""));
-  if (!template.hostname.endsWith(".3hentai.xyz") || template.pathname !== `/d${id}/%s` || template.search ||
+  const mediaId = template.pathname.match(/^\/d(\d+)\/%s$/)?.[1];
+  if (!template.hostname.endsWith(".3hentai.xyz") || !mediaId || template.search ||
       !reader.pages || typeof reader.pages !== "object") throw new Error("A lista de páginas da galeria é inválida.");
 
   const thumbnails = new Map();
@@ -205,7 +206,7 @@ async function scan3HentaiGallery(id, pageUrl) {
     try {
       const thumbnail = assertPublicUrl(match[1]);
       if (!thumbnail.hostname.endsWith(".3hentai.xyz")) continue;
-      const number = thumbnail.pathname.match(new RegExp(`^/d${id}/(\\d+)t\\.(?:jpe?g|png|webp|gif|avif)$`, "i"))?.[1];
+      const number = thumbnail.pathname.match(new RegExp(`^/d${mediaId}/(\\d+)t\\.(?:jpe?g|png|webp|gif|avif)$`, "i"))?.[1];
       if (number) thumbnails.set(Number(number), thumbnail.href);
     } catch { /* Ignore unrelated images. */ }
   }
