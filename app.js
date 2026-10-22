@@ -1,4 +1,4 @@
-import { mergeZipParts, splitZipBatches, ZIP_BATCH_SIZE } from "./lib/zip-batches.js";
+import { mergeZipParts, splitZipBatches, uniqueZipItemNames } from "./lib/zip-batches.js";
 
 (function () {
   "use strict";
@@ -327,10 +327,10 @@ import { mergeZipParts, splitZipBatches, ZIP_BATCH_SIZE } from "./lib/zip-batche
     label.textContent = "Preparando ZIP…";
     try {
       const selected = state.images.filter((item) => state.selected.has(item.id));
-      const items = selected.map((item, index) => ({
+      const items = uniqueZipItemNames(selected.map((item, index) => ({
         url: item.url,
-        name: selected.length > ZIP_BATCH_SIZE ? `${String(index + 1).padStart(4, "0")}-${displayName(item, index)}` : displayName(item, index),
-      }));
+        name: displayName(item, index),
+      })));
       const batches = splitZipBatches(items);
       const parts = [];
       for (let index = 0; index < batches.length; index++) {

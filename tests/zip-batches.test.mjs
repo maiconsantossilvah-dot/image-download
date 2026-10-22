@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { mergeZipParts, splitZipBatches, ZIP_BATCH_SIZE } from "../lib/zip-batches.js";
+import { mergeZipParts, splitZipBatches, uniqueZipItemNames, ZIP_BATCH_SIZE } from "../lib/zip-batches.js";
 
 function crc32(bytes) {
   let value = 0xffffffff;
@@ -49,6 +49,14 @@ test("splits large selections below the Worker subrequest limit", () => {
   assert.equal(ZIP_BATCH_SIZE, 8);
   assert.deepEqual(batches.map((batch) => batch.length), [8, 8, 8, 8, 8, 1]);
   assert.deepEqual(batches.flat(), Array.from({ length: 41 }, (_, index) => index));
+});
+
+test("keeps original filenames across batches and renames only duplicates", () => {
+  const items = Array.from({ length: 9 }, (_, index) => ({ url: `https://example.com/${index}`, name: index === 8 ? "Foto.JPG" : index === 0 ? "foto.jpg" : `imagem-${index}.jpg` }));
+  const batches = splitZipBatches(uniqueZipItemNames(items));
+  assert.equal(batches[0][0].name, "foto.jpg");
+  assert.equal(batches[1][0].name, "Foto (2).JPG");
+  assert.equal(batches[0][1].name, "imagem-1.jpg");
 });
 
 test("combines separate ZIP responses into one readable ZIP", async () => {

@@ -8,7 +8,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
-import { mergeZipParts, splitZipBatches, ZIP_BATCH_SIZE } from "@/lib/zip-batches";
+import { mergeZipParts, splitZipBatches, uniqueZipItemNames } from "@/lib/zip-batches";
 
 type FoundImage = { id: string; url: string; previewUrl?: string; alt: string; format: string; source: string; inline: boolean; width?: number; height?: number };
 type ScanResult = { pageTitle: string; pageUrl: string; images: FoundImage[]; notice?: string };
@@ -179,10 +179,10 @@ export default function Home() {
     setDownloading(true);
     const toastId = toast.loading("Preparando seu arquivo ZIP…");
     try {
-      const items = selectedImages.map((image, index) => ({
+      const items = uniqueZipItemNames(selectedImages.map((image, index) => ({
         url: image.url,
-        name: selectedImages.length > ZIP_BATCH_SIZE ? `${String(index + 1).padStart(4, "0")}-${fileName(image, index)}` : fileName(image, index),
-      }));
+        name: fileName(image, index),
+      })));
       const batches = splitZipBatches(items);
       const parts: Blob[] = [];
       for (let index = 0; index < batches.length; index++) {
