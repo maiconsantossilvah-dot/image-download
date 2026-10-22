@@ -39,6 +39,7 @@ next-env.d.ts
 /dist/
 /.wrangler/
 /worker/.wrangler/
+/worker/.dev.vars
 # Checkout-local execution profile and tool state; never publish them.
 /.sites-runtime/
 /.agents/

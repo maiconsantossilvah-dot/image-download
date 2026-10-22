@@ -24,7 +24,7 @@ export default {
       if (pathname === "/health" && request.method === "GET") {
         response = json({ ok: true, service: "captura-imagens-api" });
       } else if (pathname === "/api/scan" && request.method === "POST") {
-        response = await scan(request);
+        response = await scan(request, env);
       } else if (pathname === "/api/image" && request.method === "GET") {
         response = await proxyImage(request);
       } else if (pathname === "/api/bundle" && request.method === "POST") {
@@ -74,12 +74,15 @@ function json(value, status = 200, headers = {}) {
   return Response.json(value, { status, headers: { "cache-control": "no-store", ...headers } });
 }
 
-async function scan(request) {
+async function scan(request, env) {
   const body = await request.json();
   if (typeof body.url !== "string") return json({ error: "Informe uma URL válida." }, 400);
   const initial = normalizePageUrl(body.url);
   const galleryId = nhentaiGalleryId(initial);
   if (galleryId) return json(await scanNhentaiGallery(galleryId, initial));
+  const threeHentaiId = threeHentaiGalleryId(initial);
+  if (threeHentaiId) return json(await scan3HentaiGallery(threeHentaiId, initial));
+  if (isRule34Listing(initial)) return json(await scanRule34Listing(initial, env));
   const { response, finalUrl } = await safeFetch(initial, {
     headers: { accept: "text/html,application/xhtml+xml;q=0.9,*/*;q=0.7" },
   });
@@ -104,9 +107,135 @@ async function scan(request) {
   });
 }
 
+function isRule34Listing(url) {
+  return /^(?:www\.)?rule34\.xxx$/i.test(url.hostname) &&
+    url.searchParams.get("page") === "post" && url.searchParams.get("s") === "list" &&
+    Boolean(url.searchParams.get("tags")?.trim());
+}
+
+async function scanRule34Listing(pageUrl, env) {
+  const userId = String(env.RULE34_USER_ID || "").trim();
+  const apiKey = String(env.RULE34_API_KEY || "").trim();
+  if (!userId || !apiKey) throw new Error("O suporte ao Rule34 precisa de user_id e api_key configurados no servidor.");
+  const tags = pageUrl.searchParams.get("tags").trim();
+  if (tags.length > 200) throw new Error("A busca contém tags demais.");
+  const rawOffset = pageUrl.searchParams.get("pid") || "0";
+  if (!/^\d{1,7}$/.test(rawOffset)) throw new Error("A página da busca é inválida.");
+  const offset = Number(rawOffset);
+  const pageSize = 600;
+  const startPage = Math.floor(offset / pageSize);
+  const skip = offset % pageSize;
+  const posts = [];
+  for (let page = startPage; page <= Math.ceil((offset + pageSize) / pageSize) - 1; page += 1) {
+    const endpoint = new URL("https://api.rule34.xxx/index.php");
+    for (const [key, value] of Object.entries({ page: "dapi", s: "post", q: "index", json: "1", tags, limit: String(pageSize), pid: String(page), user_id: userId, api_key: apiKey })) endpoint.searchParams.set(key, value);
+    const { response } = await safeFetch(endpoint, { headers: { accept: "application/json" } });
+    if (!response.ok) throw new Error(`A API do Rule34 respondeu com o erro ${response.status}.`);
+    let batch;
+    try { batch = await response.json(); }
+    catch { throw new Error("A API do Rule34 não retornou JSON. Verifique as credenciais."); }
+    if (!Array.isArray(batch)) throw new Error("A API do Rule34 recusou a busca. Verifique as credenciais.");
+    posts.push(...batch);
+    if (batch.length < pageSize) break;
+  }
+  const selected = posts.slice(skip, skip + pageSize);
+  const images = selected.map((post) => {
+    if (!post || typeof post !== "object" || !/^\d+$/.test(String(post.id || ""))) return null;
+    const url = publicRule34Image(post.file_url);
+    if (!url) return null;
+    const previewUrl = publicRule34Image(post.preview_url) || url;
+    return {
+      id: `rule34-${post.id}`,
+      url,
+      previewUrl,
+      alt: `Post ${post.id}`,
+      source: "arquivo original do Rule34",
+      format: formatFromUrl(url),
+      width: Number(post.width) || null,
+      height: Number(post.height) || null,
+      inline: false,
+    };
+  }).filter(Boolean);
+  return {
+    pageTitle: `Rule34 — ${tags}`.slice(0, 180),
+    pageUrl: pageUrl.href,
+    images,
+    notice: selected.length >= pageSize ? "Mostramos até 600 posts desta busca. Para ver os próximos, use outra página da listagem." : undefined,
+  };
+}
+
+function publicRule34Image(value) {
+  if (typeof value !== "string") return null;
+  try {
+    const url = assertPublicUrl(value);
+    return /\.(?:jpe?g|png|webp|gif|avif|bmp)$/i.test(url.pathname) ? url.href : null;
+  } catch { return null; }
+}
+
 function nhentaiGalleryId(url) {
   if (!/^(?:www\.)?nhentai\.net$/i.test(url.hostname)) return null;
   return url.pathname.match(/^\/g\/(\d+)\/?$/)?.[1] || null;
+}
+
+function threeHentaiGalleryId(url) {
+  if (!/^(?:www\.)?3hentai\.net$/i.test(url.hostname)) return null;
+  return url.pathname.match(/^\/d\/(\d+)(?:\/\d+)?\/?$/)?.[1] || null;
+}
+
+async function scan3HentaiGallery(id, pageUrl) {
+  const galleryUrl = new URL(`https://3hentai.net/d/${id}`);
+  const readerUrl = new URL(`https://3hentai.net/d/${id}/1`);
+  const { response: galleryResponse } = await safeFetch(galleryUrl, { headers: { accept: "text/html" } });
+  if (!galleryResponse.ok) throw new Error(`A galeria respondeu com o erro ${galleryResponse.status}.`);
+  const galleryHtml = await readHtml(galleryResponse);
+  const { response: readerResponse } = await safeFetch(readerUrl, { headers: { accept: "text/html" } });
+  if (!readerResponse.ok) throw new Error(`O leitor respondeu com o erro ${readerResponse.status}.`);
+  const readerHtml = await readHtml(readerResponse);
+  const encoded = readerHtml.match(/\breaderPages\s*=\s*JSON\.parse\(atob\(["']([A-Za-z0-9+/=]+)["']\)\)/)?.[1];
+  if (!encoded) throw new Error("O leitor não informou os arquivos desta galeria.");
+  let reader;
+  try { reader = JSON.parse(atob(encoded)); }
+  catch { throw new Error("A lista de páginas da galeria é inválida."); }
+  const template = assertPublicUrl(String(reader.baseUriImg || ""));
+  if (!template.hostname.endsWith(".3hentai.xyz") || template.pathname !== `/d${id}/%s` || template.search ||
+      !reader.pages || typeof reader.pages !== "object") throw new Error("A lista de páginas da galeria é inválida.");
+
+  const thumbnails = new Map();
+  for (const match of galleryHtml.matchAll(/(?:data-src|src)\s*=\s*["'](https:\/\/[^"']+)["']/gi)) {
+    try {
+      const thumbnail = assertPublicUrl(match[1]);
+      if (!thumbnail.hostname.endsWith(".3hentai.xyz")) continue;
+      const number = thumbnail.pathname.match(new RegExp(`^/d${id}/(\\d+)t\\.(?:jpe?g|png|webp|gif|avif)$`, "i"))?.[1];
+      if (number) thumbnails.set(Number(number), thumbnail.href);
+    } catch { /* Ignore unrelated images. */ }
+  }
+
+  const pages = Object.entries(reader.pages).filter(([number, page]) =>
+    /^\d+$/.test(number) && Number(number) > 0 && page && typeof page === "object" &&
+    /^\d+\.(?:jpe?g|png|webp|gif|avif)$/i.test(String(page.f || ""))
+  ).sort(([a], [b]) => Number(a) - Number(b));
+  if (!pages.length) throw new Error("A galeria não retornou páginas de imagem.");
+  const images = pages.slice(0, 600).map(([number, page]) => {
+    const url = template.href.replace("%s", page.f);
+    return {
+      id: `3hentai-${id}-${number}`,
+      url,
+      previewUrl: thumbnails.get(Number(number)) || url,
+      alt: `Página ${number}`,
+      source: "arquivo original da galeria",
+      format: formatFromUrl(url),
+      width: Number(page.w) || null,
+      height: Number(page.h) || null,
+      inline: false,
+    };
+  });
+  const title = galleryHtml.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1]?.replace(/<[^>]+>/g, "").trim() || `Galeria ${id}`;
+  return {
+    pageTitle: htmlDecode(title).replace(/\s+-\s+3Hentai$/i, "").slice(0, 180),
+    pageUrl: pageUrl.href,
+    images,
+    notice: pages.length > 600 ? "A galeria contém muitas imagens; mostramos as primeiras 600." : undefined,
+  };
 }
 
 async function scanNhentaiGallery(id, pageUrl) {

@@ -7,6 +7,8 @@ Aplicativo para analisar páginas públicas, exibir miniaturas das imagens encon
 - encontra imagens em `img`, `picture`, `srcset`, metadados sociais e CSS;
 - prioriza a maior variante informada pela página;
 - para galerias `nhentai.net/g/...`, consulta a API v2 da galeria e usa os arquivos das páginas em resolução original, separados das miniaturas;
+- para galerias `3hentai.net/d/...`, lê a lista de páginas do leitor e usa os arquivos originais, com as miniaturas da página da galeria;
+- para listagens `rule34.xxx/index.php?page=post&s=list&tags=...`, consulta a API oficial e mostra os arquivos de imagem originais com suas miniaturas (requer credenciais);
 - mostra miniaturas, formato e dimensões do arquivo selecionado;
 - permite ampliar, navegar entre imagens, filtrar e selecionar para download;
 - gera um ZIP com os arquivos selecionados;
@@ -64,6 +66,20 @@ npx wrangler deploy --config worker/wrangler.toml
 O Worker está configurado para aceitar o domínio `https://maiconsantossilvah-dot.github.io`. Se usar um domínio próprio, altere `ALLOWED_ORIGIN` em `worker/wrangler.toml` e publique novamente. Alguns sites bloqueiam varreduras automáticas ou carregam imagens apenas depois da execução de scripts no navegador.
 
 Para disponibilizar mudanças neste repositório, publique o frontend no GitHub Pages e execute novamente o deploy do Worker. A versão local do scanner de galerias também fica em `app/api/scan/route.ts` para quem roda a aplicação com `pnpm dev`.
+
+### Listagens do Rule34
+
+A [API oficial](https://api.rule34.xxx/) exige `user_id` e `api_key`. Obtenha os dois na [página de opções da sua conta](https://rule34.xxx/index.php?page=account&s=options). O scanner usa a API da listagem e não varre as páginas HTML do site. Ele mostra até 600 posts a partir da página informada e ignora vídeos, pois o ZIP aceita imagens.
+
+Na publicação Cloudflare, configure os valores como segredos do Worker (os comandos pedem os valores interativamente):
+
+```bash
+npx wrangler secret put RULE34_USER_ID --config worker/wrangler.toml
+npx wrangler secret put RULE34_API_KEY --config worker/wrangler.toml
+npx wrangler deploy --config worker/wrangler.toml
+```
+
+Para `pnpm dev`, coloque `RULE34_USER_ID` e `RULE34_API_KEY` em `.env.local`. Para `wrangler dev --config worker/wrangler.toml`, coloque os mesmos nomes em `worker/.dev.vars`. Esses arquivos não são enviados ao Git. Nunca inclua a chave na URL colada no scanner ou no código do frontend.
 
 ## Uso responsável
 
