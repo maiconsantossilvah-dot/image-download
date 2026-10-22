@@ -8,7 +8,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
-import { createZipDownloadSession, fetchCompleteZipPart, uniqueZipItemNames } from "@/lib/zip-batches";
+import { createZipDownloadSession, fetchImageWithRetry, fetchImagesZipPart, uniqueZipItemNames, zipHasAllImages } from "@/lib/zip-batches";
 
 type FoundImage = { id: string; url: string; previewUrl?: string; alt: string; format: string; source: string; inline: boolean; width?: number; height?: number };
 type ScanResult = { pageTitle: string; pageUrl: string; images: FoundImage[]; notice?: string };
@@ -26,36 +26,6 @@ async function verifyZip(blob: Blob) {
       directoryOffset + directorySize + 22 !== blob.size) throw interrupted();
   const header = new DataView(await blob.slice(directoryOffset, directoryOffset + 4).arrayBuffer());
   if (header.byteLength !== 4 || header.getUint32(0, true) !== 0x02014b50) throw interrupted();
-}
-
-async function fetchZipWithRetry(body: string, onRetry: (attempt: number, total: number) => void): Promise<Blob> {
-  const maxAttempts = 3;
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    let retryable = true;
-    try {
-      const response = await fetch("/api/bundle", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body,
-      });
-      if (!response.ok) {
-        retryable = response.status === 429 || response.status >= 500;
-        const data = (await response.json().catch(() => ({}))) as { error?: string };
-        throw new Error(data.error || "Não foi possível preparar o download.");
-      }
-      const blob = await response.blob();
-      await verifyZip(blob);
-      return blob;
-    } catch (error) {
-      if (!retryable) throw error;
-      if (attempt === maxAttempts) {
-        throw new Error(`Não foi possível concluir o download após ${maxAttempts} tentativas. ${error instanceof Error ? error.message : "Tente novamente mais tarde."}`);
-      }
-      onRetry(attempt + 1, maxAttempts);
-      await new Promise((resolve) => window.setTimeout(resolve, 750 * 2 ** (attempt - 1)));
-    }
-  }
-  throw new Error("Não foi possível preparar o download.");
 }
 
 function previewUrl(image: FoundImage) {
@@ -190,19 +160,19 @@ export default function Home() {
       const items = uniqueZipItemNames(selectedImages.map((image, index) => ({
         url: image.url,
         name: fileName(image, index),
+        format: image.format,
       })));
-      const blob = await downloadSessionRef.current.run(items, (batch, index, total, recovery) => fetchCompleteZipPart(batch, (chunk) => {
-        const body = JSON.stringify({ pageUrl: result?.pageUrl, items: chunk });
-        return fetchZipWithRetry(body, (attempt, attempts) => {
-          toast.loading(`Parte ${index + 1}/${total} interrompida. Tentativa ${attempt} de ${attempts}…`, { id: toastId });
-        });
-      }, () => {
-        toast.loading(`A parte ${index + 1}/${total} veio incompleta. Recuperando as imagens restantes…`, { id: toastId });
-      }, recovery), (index, total) => {
+      const blob = await downloadSessionRef.current.run(items, (batch, index, total, recovery) => fetchImagesZipPart(batch, (item) =>
+        fetchImageWithRetry(item, (url) => `/api/image?url=${encodeURIComponent(url)}`, (attempt, attempts) => {
+          toast.loading(`Imagem ${item.name} interrompida. Tentativa ${attempt} de ${attempts}…`, { id: toastId });
+        }), recovery, (done, count) => {
+          toast.loading(`Parte ${index + 1}/${total}: ${done} de ${count} imagens…`, { id: toastId });
+        }), (index, total) => {
         toast.loading(`Preparando parte ${index} de ${total}…`, { id: toastId });
       });
       toast.loading("Juntando as partes do ZIP…", { id: toastId });
       await verifyZip(blob);
+      if (!await zipHasAllImages(blob, items.length)) throw new Error("O ZIP não contém todas as imagens selecionadas.");
       const href = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
       anchor.href = href;
@@ -215,7 +185,7 @@ export default function Home() {
       toast.success("Download iniciado.", { id: toastId });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Falha no download.";
-      toast.error(downloadSessionRef.current.completedCount() ? `${message} As partes prontas foram mantidas. Clique em Baixar ZIP para continuar.` : message, { id: toastId });
+      toast.error(downloadSessionRef.current.completedCount() ? `${message} O progresso foi mantido. Clique em Baixar ZIP para continuar sem recarregar a página.` : message, { id: toastId });
     } finally {
       downloadRunningRef.current = false;
       setDownloading(false);

@@ -1,4 +1,4 @@
-import { createZipDownloadSession, fetchCompleteZipPart, uniqueZipItemNames } from "./lib/zip-batches.js";
+import { createZipDownloadSession, fetchImageWithRetry, fetchImagesZipPart, uniqueZipItemNames, zipHasAllImages } from "./lib/zip-batches.js";
 
 (function () {
   "use strict";
@@ -245,34 +245,6 @@ import { createZipDownloadSession, fetchCompleteZipPart, uniqueZipItemNames } fr
     }
   }
 
-  async function fetchZipWithRetry(items, onRetry) {
-    const maxAttempts = 3;
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      let retryable = true;
-      try {
-        const response = await fetch(apiUrl("/api/bundle"), {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ items }),
-        });
-        if (!response.ok) {
-          retryable = response.status === 429 || response.status >= 500;
-          await readJson(response);
-        }
-        const blob = await response.blob();
-        await verifyZip(blob);
-        return blob;
-      } catch (error) {
-        if (!retryable) throw error;
-        if (attempt === maxAttempts) {
-          throw new Error(`Não foi possível concluir o download após ${maxAttempts} tentativas. ${error instanceof Error ? error.message : "Tente novamente mais tarde."}`);
-        }
-        onRetry(attempt + 1, maxAttempts);
-        await new Promise((resolve) => window.setTimeout(resolve, 750 * 2 ** (attempt - 1)));
-      }
-    }
-  }
-
   async function scan(event) {
     event.preventDefault();
     if (state.busy) return;
@@ -332,20 +304,21 @@ import { createZipDownloadSession, fetchCompleteZipPart, uniqueZipItemNames } fr
       const items = uniqueZipItemNames(selected.map((item, index) => ({
         url: item.url,
         name: displayName(item, index),
+        format: item.format,
       })));
-      const blob = await downloadSession.run(items, (batch, index, total, recovery) => fetchCompleteZipPart(batch, (chunk) =>
-        fetchZipWithRetry(chunk, (attempt, attempts) => {
+      const blob = await downloadSession.run(items, (batch, index, total, recovery) => fetchImagesZipPart(batch, (item) =>
+        fetchImageWithRetry(item, (url) => apiUrl(`/api/image?url=${encodeURIComponent(url)}`), (attempt, attempts) => {
           label.textContent = `Tentativa ${attempt} de ${attempts}…`;
-          showStatus(`Parte ${index + 1}/${total} interrompida. Tentando novamente (${attempt}/${attempts})…`, "info");
-        }), () => {
-          label.textContent = `Recuperando parte ${index + 1}/${total}…`;
-          showStatus(`A parte ${index + 1}/${total} veio incompleta. Recuperando as imagens restantes…`, "info");
-        }, recovery), (index, total) => {
+          showStatus(`Imagem ${item.name} interrompida. Tentando novamente (${attempt}/${attempts})…`, "info");
+        }), recovery, (done, count) => {
+          label.textContent = `Parte ${index + 1}/${total}: ${done}/${count}…`;
+        }), (index, total) => {
         label.textContent = `Preparando parte ${index}/${total}…`;
         showStatus(`Preparando parte ${index} de ${total}…`, "info");
       });
       label.textContent = "Juntando ZIP…";
       await verifyZip(blob);
+      if (!await zipHasAllImages(blob, items.length)) throw new Error("O ZIP não contém todas as imagens selecionadas.");
       const href = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = href;
@@ -358,7 +331,7 @@ import { createZipDownloadSession, fetchCompleteZipPart, uniqueZipItemNames } fr
       showStatus("Seu arquivo ZIP foi preparado e o download começou.", "info");
     } catch (error) {
       const message = error instanceof Error ? error.message : "Não foi possível preparar o arquivo ZIP.";
-      showStatus(downloadSession.completedCount() ? `${message} As partes prontas foram mantidas. Clique em Baixar ZIP para continuar.` : message);
+      showStatus(downloadSession.completedCount() ? `${message} O progresso foi mantido. Clique em Baixar ZIP para continuar sem recarregar a página.` : message);
     } finally {
       setBusy(false);
       label.textContent = "Baixar ZIP";
