@@ -226,6 +226,22 @@
     return data;
   }
 
+  async function verifyZip(blob) {
+    if (blob.size < 22) throw new Error("O download foi interrompido. Tente novamente.");
+    const footer = new DataView(await blob.slice(-22).arrayBuffer());
+    const directorySize = footer.getUint32(12, true);
+    const directoryOffset = footer.getUint32(16, true);
+    if (footer.getUint32(0, true) !== 0x06054b50 ||
+        footer.getUint16(8, true) === 0 ||
+        directoryOffset + directorySize + 22 !== blob.size) {
+      throw new Error("O download foi interrompido. Tente novamente.");
+    }
+    const header = new DataView(await blob.slice(directoryOffset, directoryOffset + 4).arrayBuffer());
+    if (header.byteLength !== 4 || header.getUint32(0, true) !== 0x02014b50) {
+      throw new Error("O download foi interrompido. Tente novamente.");
+    }
+  }
+
   async function scan(event) {
     event.preventDefault();
     if (state.busy) return;
@@ -291,6 +307,7 @@
       });
       if (!response.ok) await readJson(response);
       const blob = await response.blob();
+      await verifyZip(blob);
       const href = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = href;

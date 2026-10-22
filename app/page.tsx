@@ -14,6 +14,19 @@ type ScanResult = { pageTitle: string; pageUrl: string; images: FoundImage[]; no
 type ImageSize = { width: number; height: number };
 const DEMO_FORMATS = ["JPG", "PNG", "WEBP", "SVG"];
 
+async function verifyZip(blob: Blob) {
+  const interrupted = () => new Error("O download foi interrompido. Tente novamente.");
+  if (blob.size < 22) throw interrupted();
+  const footer = new DataView(await blob.slice(-22).arrayBuffer());
+  const directorySize = footer.getUint32(12, true);
+  const directoryOffset = footer.getUint32(16, true);
+  if (footer.getUint32(0, true) !== 0x06054b50 ||
+      footer.getUint16(8, true) === 0 ||
+      directoryOffset + directorySize + 22 !== blob.size) throw interrupted();
+  const header = new DataView(await blob.slice(directoryOffset, directoryOffset + 4).arrayBuffer());
+  if (header.byteLength !== 4 || header.getUint32(0, true) !== 0x02014b50) throw interrupted();
+}
+
 function previewUrl(image: FoundImage) {
   const url = image.previewUrl || image.url;
   return image.inline ? url : `/api/image?url=${encodeURIComponent(url)}`;
@@ -145,6 +158,7 @@ export default function Home() {
         throw new Error(data.error || "Não foi possível preparar o download.");
       }
       const blob = await response.blob();
+      await verifyZip(blob);
       const href = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
       anchor.href = href;

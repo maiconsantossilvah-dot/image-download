@@ -43,60 +43,73 @@ export function uniqueFileName(name: string, usedNames: Set<string>) {
 }
 
 export function createZipStream(produce: (writer: ZipWriter) => Promise<void>) {
-  return new ReadableStream<Uint8Array>({
-    async start(controller) {
-      const writer = new ZipWriter(controller);
-      try { await produce(writer); await writer.close(); }
-      catch (error) { controller.error(error); }
-    },
-  });
+  const stream = new TransformStream<Uint8Array, Uint8Array>();
+  const output = stream.writable.getWriter();
+  const writer = new ZipWriter(output);
+  void (async () => {
+    try { await produce(writer); await writer.close(); }
+    catch (error) { await output.abort(error).catch(() => {}); }
+  })();
+  return stream.readable;
 }
 
 export class ZipWriter {
   private offset = 0;
   private entries: ZipEntry[] = [];
-  constructor(private controller: ReadableStreamDefaultController<Uint8Array>) {}
+  private failed = false;
+  constructor(private output: WritableStreamDefaultWriter<Uint8Array>) {}
 
-  private push(chunk: Uint8Array) { this.controller.enqueue(chunk); this.offset += chunk.byteLength; }
+  private async push(chunk: Uint8Array) { await this.output.write(chunk); this.offset += chunk.byteLength; }
 
   async add(nameValue: string, stream: ReadableStream<Uint8Array> | Uint8Array) {
+    if (this.failed) throw new Error("O fluxo do ZIP foi interrompido.");
     const name = encoder.encode(nameValue);
     const { time, date } = dosDateTime();
     const entryOffset = this.offset;
-    this.push(bytes([
+    await this.push(bytes([
       ...u32(0x04034b50), ...u16(20), ...u16(0x0808), ...u16(0), ...u16(time), ...u16(date),
       ...u32(0), ...u32(0), ...u32(0), ...u16(name.length), ...u16(0),
     ]));
-    this.push(name);
+    await this.push(name);
     let crc = 0xffffffff;
     let size = 0;
-    if (stream instanceof Uint8Array) {
-      crc = updateCrc(crc, stream); size = stream.byteLength; this.push(stream);
-    } else {
-      const reader = stream.getReader();
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        crc = updateCrc(crc, value); size += value.byteLength; this.push(value);
+    try {
+      if (stream instanceof Uint8Array) {
+        crc = updateCrc(crc, stream); size = stream.byteLength; await this.push(stream);
+      } else {
+        const reader = stream.getReader();
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            size += value.byteLength;
+            if (size > 100_000_000) { await reader.cancel(); throw new Error("arquivo maior que 100 MB"); }
+            crc = updateCrc(crc, value); await this.push(value);
+          }
+        } finally { reader.releaseLock(); }
       }
+    } catch (error) {
+      this.failed = true;
+      throw error;
     }
     crc = (crc ^ 0xffffffff) >>> 0;
-    this.push(bytes([...u32(0x08074b50), ...u32(crc), ...u32(size), ...u32(size)]));
+    await this.push(bytes([...u32(0x08074b50), ...u32(crc), ...u32(size), ...u32(size)]));
     this.entries.push({ name, crc, size, offset: entryOffset, time, date });
   }
 
   async close() {
+    if (this.failed) throw new Error("O fluxo do ZIP foi interrompido.");
     const directoryOffset = this.offset;
     for (const entry of this.entries) {
-      this.push(bytes([
+      await this.push(bytes([
         ...u32(0x02014b50), ...u16(20), ...u16(20), ...u16(0x0808), ...u16(0), ...u16(entry.time), ...u16(entry.date),
         ...u32(entry.crc), ...u32(entry.size), ...u32(entry.size), ...u16(entry.name.length), ...u16(0), ...u16(0),
         ...u16(0), ...u16(0), ...u32(0), ...u32(entry.offset),
       ]));
-      this.push(entry.name);
+      await this.push(entry.name);
     }
     const directorySize = this.offset - directoryOffset;
-    this.push(bytes([...u32(0x06054b50), ...u16(0), ...u16(0), ...u16(this.entries.length), ...u16(this.entries.length), ...u32(directorySize), ...u32(directoryOffset), ...u16(0)]));
-    this.controller.close();
+    await this.push(bytes([...u32(0x06054b50), ...u16(0), ...u16(0), ...u16(this.entries.length), ...u16(this.entries.length), ...u32(directorySize), ...u32(directoryOffset), ...u16(0)]));
+    await this.output.close();
   }
 }
