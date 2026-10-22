@@ -8,6 +8,7 @@ Aplicativo para analisar páginas públicas, exibir miniaturas das imagens encon
 - prioriza a maior variante informada pela página;
 - para galerias `nhentai.net/g/...`, consulta a API v2 da galeria e usa os arquivos das páginas em resolução original, separados das miniaturas;
 - para galerias `3hentai.net/d/...`, lê a lista de páginas do leitor e usa os arquivos originais, com as miniaturas da página da galeria;
+- para artigos `mundohentaioficial.com/...`, lista apenas as imagens da galeria principal, na ordem correta, sem logos nem recomendações;
 - para listagens `rule34.xxx/index.php?page=post&s=list&tags=...`, consulta a API oficial e mostra os arquivos de imagem originais com suas miniaturas (requer credenciais);
 - mostra miniaturas, formato e dimensões do arquivo selecionado;
 - permite ampliar, navegar entre imagens, filtrar e selecionar para download;

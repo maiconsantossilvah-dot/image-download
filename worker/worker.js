@@ -93,6 +93,13 @@ async function scan(request, env) {
   }
   const html = await readHtml(response);
   const title = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1]?.replace(/<[^>]+>/g, "").trim() || finalUrl.hostname;
+  const mundoHentaiImages = extractMundoHentaiGallery(html, finalUrl);
+  if (mundoHentaiImages) return json({
+    pageTitle: htmlDecode(title).slice(0, 180),
+    pageUrl: finalUrl.href,
+    images: mundoHentaiImages,
+    notice: mundoHentaiImages.length >= 600 ? "A galeria contém muitas imagens; mostramos as primeiras 600." : undefined,
+  });
   const extracted = extractImages(html, finalUrl);
   const images = extracted.map((image, index) => ({
     ...image,
@@ -105,6 +112,46 @@ async function scan(request, env) {
     images,
     notice: extracted.length >= 600 ? "A página contém muitas imagens; mostramos as primeiras 600." : undefined,
   });
+}
+
+function extractMundoHentaiGallery(html, base) {
+  if (!/^(?:www\.)?mundohentaioficial\.com$/i.test(base.hostname)) return null;
+  const gallery = html.match(/<ul\b[^>]*class\s*=\s*["'][^"']*\bpost-fotos\b[^"']*["'][^>]*>([\s\S]*?)<\/ul>/i)?.[1];
+  if (!gallery) return null;
+  const found = new Map();
+  let galleryId = null;
+  for (const item of gallery.matchAll(/<li\b[^>]*>([\s\S]*?)<\/li>/gi)) {
+    const linkTag = item[1].match(/<a\b([^>]*)>/i);
+    const imageTag = item[1].match(/<img\b([^>]*)>/i);
+    if (!linkTag || !imageTag) continue;
+    const link = attributes(linkTag[1]);
+    const image = attributes(imageTag[1]);
+    try {
+      const galleryUrl = assertPublicUrl(new URL(link.href, base));
+      if (galleryUrl.hostname !== base.hostname || galleryUrl.pathname !== "/galeria") continue;
+      const id = galleryUrl.searchParams.get("id");
+      const number = galleryUrl.searchParams.get("img");
+      if (!/^\d+$/.test(id || "") || !/^\d+$/.test(number || "") || Number(number) < 1) continue;
+      if (galleryId && id !== galleryId) continue;
+      const rawImage = bestSrcset(image.srcset || image["data-srcset"] || "") || image["data-src"] || image.src;
+      const url = assertPublicUrl(new URL(rawImage, base));
+      if (url.hostname !== base.hostname || !/^\/wp-content\/uploads\/\d{4}\/\d{2}\/[^/]+\.(?:jpe?g|png|webp|gif|avif)$/i.test(url.pathname)) continue;
+      galleryId = id;
+      const pageNumber = Number(number);
+      if (found.has(pageNumber)) continue;
+      found.set(pageNumber, {
+        id: `mundo-hentai-${id}-${pageNumber}`,
+        url: url.href,
+        previewUrl: url.href,
+        alt: `Página ${pageNumber}`,
+        source: "imagem da galeria",
+        format: formatFromUrl(url.href),
+        inline: false,
+      });
+    } catch { /* Ignore unrelated or malformed links. */ }
+  }
+  if (!found.size) throw new Error("A galeria não retornou imagens válidas.");
+  return [...found.entries()].sort(([a], [b]) => a - b).slice(0, 600).map(([, image]) => image);
 }
 
 function isRule34Listing(url) {
