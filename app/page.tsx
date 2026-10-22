@@ -27,6 +27,36 @@ async function verifyZip(blob: Blob) {
   if (header.byteLength !== 4 || header.getUint32(0, true) !== 0x02014b50) throw interrupted();
 }
 
+async function fetchZipWithRetry(body: string, onRetry: (attempt: number, total: number) => void): Promise<Blob> {
+  const maxAttempts = 3;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    let retryable = true;
+    try {
+      const response = await fetch("/api/bundle", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body,
+      });
+      if (!response.ok) {
+        retryable = response.status === 429 || response.status >= 500;
+        const data = (await response.json().catch(() => ({}))) as { error?: string };
+        throw new Error(data.error || "Não foi possível preparar o download.");
+      }
+      const blob = await response.blob();
+      await verifyZip(blob);
+      return blob;
+    } catch (error) {
+      if (!retryable) throw error;
+      if (attempt === maxAttempts) {
+        throw new Error(`Não foi possível concluir o download após ${maxAttempts} tentativas. ${error instanceof Error ? error.message : "Tente novamente mais tarde."}`);
+      }
+      onRetry(attempt + 1, maxAttempts);
+      await new Promise((resolve) => window.setTimeout(resolve, 750 * 2 ** (attempt - 1)));
+    }
+  }
+  throw new Error("Não foi possível preparar o download.");
+}
+
 function previewUrl(image: FoundImage) {
   const url = image.previewUrl || image.url;
   return image.inline ? url : `/api/image?url=${encodeURIComponent(url)}`;
@@ -148,17 +178,10 @@ export default function Home() {
     setDownloading(true);
     const toastId = toast.loading("Preparando seu arquivo ZIP…");
     try {
-      const response = await fetch("/api/bundle", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ pageUrl: result?.pageUrl, items: selectedImages.map((image, index) => ({ url: image.url, name: fileName(image, index) })) }),
+      const body = JSON.stringify({ pageUrl: result?.pageUrl, items: selectedImages.map((image, index) => ({ url: image.url, name: fileName(image, index) })) });
+      const blob = await fetchZipWithRetry(body, (attempt, total) => {
+        toast.loading(`Download interrompido. Tentativa ${attempt} de ${total}…`, { id: toastId });
       });
-      if (!response.ok) {
-        const data = (await response.json().catch(() => ({}))) as { error?: string };
-        throw new Error(data.error || "Não foi possível preparar o download.");
-      }
-      const blob = await response.blob();
-      await verifyZip(blob);
       const href = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
       anchor.href = href;
