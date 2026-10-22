@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { mergeZipParts, splitZipBatches, uniqueZipItemNames, ZIP_BATCH_SIZE } from "../lib/zip-batches.js";
+import { createZipDownloadSession, fetchCompleteZipPart, mergeZipParts, splitZipBatches, uniqueZipItemNames, zipHasAllImages, ZIP_BATCH_SIZE } from "../lib/zip-batches.js";
 
 function crc32(bytes) {
   let value = 0xffffffff;
@@ -44,15 +44,15 @@ function oneFileZip(name, content) {
   return new Blob([local, nameBytes, data, descriptor, directory, nameBytes, footer]);
 }
 
-test("splits large selections below the Worker subrequest limit", () => {
-  const batches = splitZipBatches(Array.from({ length: 41 }, (_, index) => index));
-  assert.equal(ZIP_BATCH_SIZE, 8);
-  assert.deepEqual(batches.map((batch) => batch.length), [8, 8, 8, 8, 8, 1]);
-  assert.deepEqual(batches.flat(), Array.from({ length: 41 }, (_, index) => index));
+test("splits selections into groups of 50", () => {
+  const batches = splitZipBatches(Array.from({ length: 101 }, (_, index) => index));
+  assert.equal(ZIP_BATCH_SIZE, 50);
+  assert.deepEqual(batches.map((batch) => batch.length), [50, 50, 1]);
+  assert.deepEqual(batches.flat(), Array.from({ length: 101 }, (_, index) => index));
 });
 
 test("keeps original filenames across batches and renames only duplicates", () => {
-  const items = Array.from({ length: 9 }, (_, index) => ({ url: `https://example.com/${index}`, name: index === 8 ? "Foto.JPG" : index === 0 ? "foto.jpg" : `imagem-${index}.jpg` }));
+  const items = Array.from({ length: 51 }, (_, index) => ({ url: `https://example.com/${index}`, name: index === 50 ? "Foto.JPG" : index === 0 ? "foto.jpg" : `imagem-${index}.jpg` }));
   const batches = splitZipBatches(uniqueZipItemNames(items));
   assert.equal(batches[0][0].name, "foto.jpg");
   assert.equal(batches[1][0].name, "Foto (2).JPG");
@@ -80,4 +80,59 @@ test("combines separate ZIP responses into one readable ZIP", async () => {
   }
   assert.equal(cursor, footerOffset);
   assert.deepEqual(entries, [["one.jpg", "first"], ["two.jpg", "second"]]);
+});
+
+test("recovers an incomplete group of 50 using smaller requests", async () => {
+  const items = Array.from({ length: 50 }, (_, index) => ({ name: `image-${index}.jpg`, url: `https://example.com/${index}` }));
+  const calls = [];
+  let fallbacks = 0;
+  const result = await fetchCompleteZipPart(items, async (chunk) => {
+    calls.push(chunk.length);
+    if (chunk.length === 50) return oneFileZip("falhas.txt", "incomplete");
+    return mergeZipParts(chunk.map((item) => oneFileZip(item.name, item.url)));
+  }, () => { fallbacks++; });
+  assert.deepEqual(calls, [50, 8, 8, 8, 8, 8, 8, 2]);
+  assert.equal(fallbacks, 1);
+  assert.equal(await zipHasAllImages(result, 50), true);
+});
+
+test("resumes from the failed group without fetching completed groups again", async () => {
+  const session = createZipDownloadSession();
+  const items = Array.from({ length: 101 }, (_, index) => ({ name: `image-${index}.jpg`, url: `https://example.com/${index}` }));
+  const calls = [];
+  let fail = true;
+  const fetchPart = async (batch, index) => {
+    calls.push(index);
+    if (index === 1 && fail) { fail = false; throw new Error("interrupted"); }
+    return mergeZipParts(batch.map((item) => oneFileZip(item.name, item.url)));
+  };
+  await assert.rejects(session.run(items, fetchPart, () => {}), /interrupted/);
+  assert.equal(session.completedCount(), 1);
+  const result = await session.run(items, fetchPart, () => {});
+  assert.deepEqual(calls, [0, 1, 1, 2]);
+  assert.equal(await zipHasAllImages(result, 101), true);
+  session.reset();
+  assert.equal(session.completedCount(), 0);
+});
+
+test("resumes inside a failed group without repeating recovered images", async () => {
+  const session = createZipDownloadSession();
+  const items = Array.from({ length: 50 }, (_, index) => ({ name: `image-${index}.jpg`, url: `https://example.com/${index}` }));
+  const calls = [];
+  let failSecondSmallGroup = true;
+  const fetchPart = (batch, index, total, recovery) => fetchCompleteZipPart(batch, async (chunk) => {
+    calls.push(chunk[0].name);
+    if (chunk.length === 50) throw new Error("The Worker stopped");
+    if (chunk[0].name === "image-8.jpg" && failSecondSmallGroup) {
+      failSecondSmallGroup = false;
+      throw new Error("The second small group stopped");
+    }
+    return mergeZipParts(chunk.map((item) => oneFileZip(item.name, item.url)));
+  }, () => {}, recovery);
+  await assert.rejects(session.run(items, fetchPart, () => {}), /second small group/);
+  assert.equal(session.completedCount(), 1);
+  const result = await session.run(items, fetchPart, () => {});
+  assert.equal(await zipHasAllImages(result, 50), true);
+  assert.equal(calls.filter((name) => name === "image-0.jpg").length, 2);
+  assert.equal(calls.filter((name) => name === "image-8.jpg").length, 2);
 });

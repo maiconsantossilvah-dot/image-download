@@ -1,4 +1,4 @@
-import { mergeZipParts, splitZipBatches, uniqueZipItemNames } from "./lib/zip-batches.js";
+import { createZipDownloadSession, fetchCompleteZipPart, uniqueZipItemNames } from "./lib/zip-batches.js";
 
 (function () {
   "use strict";
@@ -46,6 +46,7 @@ import { mergeZipParts, splitZipBatches, uniqueZipItemNames } from "./lib/zip-ba
   };
 
   const state = { images: [], selected: new Set(), filter: "TODOS", busy: false, viewerIndex: 0 };
+  const downloadSession = createZipDownloadSession();
   let progressTimer = null;
 
   function showStatus(message, tone = "error") {
@@ -288,6 +289,7 @@ import { mergeZipParts, splitZipBatches, uniqueZipItemNames } from "./lib/zip-ba
 
     showStatus("");
     setBusy(true, "Procurando…");
+    downloadSession.reset();
     startProgress();
     try {
       const data = await fetch(apiUrl("/api/scan"), {
@@ -331,17 +333,18 @@ import { mergeZipParts, splitZipBatches, uniqueZipItemNames } from "./lib/zip-ba
         url: item.url,
         name: displayName(item, index),
       })));
-      const batches = splitZipBatches(items);
-      const parts = [];
-      for (let index = 0; index < batches.length; index++) {
-        if (batches.length > 1) label.textContent = `Preparando parte ${index + 1}/${batches.length}…`;
-        parts.push(await fetchZipWithRetry(batches[index], (attempt, total) => {
-          label.textContent = `Tentativa ${attempt} de ${total}…`;
-          showStatus(`Parte ${index + 1}/${batches.length} interrompida. Tentando novamente (${attempt}/${total})…`, "info");
-        }));
-      }
+      const blob = await downloadSession.run(items, (batch, index, total, recovery) => fetchCompleteZipPart(batch, (chunk) =>
+        fetchZipWithRetry(chunk, (attempt, attempts) => {
+          label.textContent = `Tentativa ${attempt} de ${attempts}…`;
+          showStatus(`Parte ${index + 1}/${total} interrompida. Tentando novamente (${attempt}/${attempts})…`, "info");
+        }), () => {
+          label.textContent = `Recuperando parte ${index + 1}/${total}…`;
+          showStatus(`A parte ${index + 1}/${total} veio incompleta. Recuperando as imagens restantes…`, "info");
+        }, recovery), (index, total) => {
+        label.textContent = `Preparando parte ${index}/${total}…`;
+        showStatus(`Preparando parte ${index} de ${total}…`, "info");
+      });
       label.textContent = "Juntando ZIP…";
-      const blob = await mergeZipParts(parts);
       await verifyZip(blob);
       const href = URL.createObjectURL(blob);
       const link = document.createElement("a");
@@ -351,9 +354,11 @@ import { mergeZipParts, splitZipBatches, uniqueZipItemNames } from "./lib/zip-ba
       link.click();
       link.remove();
       window.setTimeout(() => URL.revokeObjectURL(href), 30_000);
+      downloadSession.reset();
       showStatus("Seu arquivo ZIP foi preparado e o download começou.", "info");
     } catch (error) {
-      showStatus(error instanceof Error ? error.message : "Não foi possível preparar o arquivo ZIP.");
+      const message = error instanceof Error ? error.message : "Não foi possível preparar o arquivo ZIP.";
+      showStatus(downloadSession.completedCount() ? `${message} As partes prontas foram mantidas. Clique em Baixar ZIP para continuar.` : message);
     } finally {
       setBusy(false);
       label.textContent = "Baixar ZIP";

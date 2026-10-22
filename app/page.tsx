@@ -8,7 +8,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
-import { mergeZipParts, splitZipBatches, uniqueZipItemNames } from "@/lib/zip-batches";
+import { createZipDownloadSession, fetchCompleteZipPart, uniqueZipItemNames } from "@/lib/zip-batches";
 
 type FoundImage = { id: string; url: string; previewUrl?: string; alt: string; format: string; source: string; inline: boolean; width?: number; height?: number };
 type ScanResult = { pageTitle: string; pageUrl: string; images: FoundImage[]; notice?: string };
@@ -90,8 +90,14 @@ export default function Home() {
   const [format, setFormat] = useState("TODOS");
   const [viewerIndex, setViewerIndex] = useState<number | null>(null);
   const scanRef = useRef<(value: string) => Promise<ScanResult>>(() => Promise.reject(new Error("Scanner indisponível")));
+  const downloadSessionRef = useRef(createZipDownloadSession());
+  const downloadRunningRef = useRef(false);
 
   const runScan = useCallback(async (value = url) => {
+    if (downloadRunningRef.current) {
+      toast.error("Aguarde o download atual terminar.");
+      throw new Error("Download em andamento");
+    }
     const cleanUrl = value.trim();
     if (!cleanUrl) {
       toast.error("Cole o endereço de uma página para começar.");
@@ -100,6 +106,7 @@ export default function Home() {
     setLoading(true);
     setProgress(12);
     setResult(null);
+    downloadSessionRef.current.reset();
     setSelected(new Set());
     setSizes({});
     setFormat("TODOS");
@@ -175,7 +182,8 @@ export default function Home() {
   });
 
   const downloadSelected = async () => {
-    if (!selectedImages.length) return;
+    if (!selectedImages.length || downloadRunningRef.current) return;
+    downloadRunningRef.current = true;
     setDownloading(true);
     const toastId = toast.loading("Preparando seu arquivo ZIP…");
     try {
@@ -183,17 +191,17 @@ export default function Home() {
         url: image.url,
         name: fileName(image, index),
       })));
-      const batches = splitZipBatches(items);
-      const parts: Blob[] = [];
-      for (let index = 0; index < batches.length; index++) {
-        if (batches.length > 1) toast.loading(`Preparando parte ${index + 1} de ${batches.length}…`, { id: toastId });
-        const body = JSON.stringify({ pageUrl: result?.pageUrl, items: batches[index] });
-        parts.push(await fetchZipWithRetry(body, (attempt, total) => {
-          toast.loading(`Parte ${index + 1}/${batches.length} interrompida. Tentativa ${attempt} de ${total}…`, { id: toastId });
-        }));
-      }
-      if (parts.length > 1) toast.loading("Juntando as partes do ZIP…", { id: toastId });
-      const blob = await mergeZipParts(parts);
+      const blob = await downloadSessionRef.current.run(items, (batch, index, total, recovery) => fetchCompleteZipPart(batch, (chunk) => {
+        const body = JSON.stringify({ pageUrl: result?.pageUrl, items: chunk });
+        return fetchZipWithRetry(body, (attempt, attempts) => {
+          toast.loading(`Parte ${index + 1}/${total} interrompida. Tentativa ${attempt} de ${attempts}…`, { id: toastId });
+        });
+      }, () => {
+        toast.loading(`A parte ${index + 1}/${total} veio incompleta. Recuperando as imagens restantes…`, { id: toastId });
+      }, recovery), (index, total) => {
+        toast.loading(`Preparando parte ${index} de ${total}…`, { id: toastId });
+      });
+      toast.loading("Juntando as partes do ZIP…", { id: toastId });
       await verifyZip(blob);
       const href = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
@@ -203,10 +211,15 @@ export default function Home() {
       anchor.click();
       anchor.remove();
       window.setTimeout(() => URL.revokeObjectURL(href), 30_000);
+      downloadSessionRef.current.reset();
       toast.success("Download iniciado.", { id: toastId });
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Falha no download.", { id: toastId });
-    } finally { setDownloading(false); }
+      const message = error instanceof Error ? error.message : "Falha no download.";
+      toast.error(downloadSessionRef.current.completedCount() ? `${message} As partes prontas foram mantidas. Clique em Baixar ZIP para continuar.` : message, { id: toastId });
+    } finally {
+      downloadRunningRef.current = false;
+      setDownloading(false);
+    }
   };
 
   return (
