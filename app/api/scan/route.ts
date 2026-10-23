@@ -5,7 +5,7 @@ export const runtime = "edge";
 type Found = { url: string; alt: string; source: string; inline: boolean };
 
 function htmlDecode(value: string) {
-  return value.replace(/&amp;/gi, "&").replace(/&quot;/gi, '"').replace(/&#39;|&apos;/gi, "'").replace(/&lt;/gi, "<").replace(/&gt;/gi, ">").replace(/\\\//g, "/").trim();
+  return value.replace(/&amp;|&#0*38;|&#x0*26;/gi, "&").replace(/&quot;/gi, '"').replace(/&#39;|&apos;/gi, "'").replace(/&lt;/gi, "<").replace(/&gt;/gi, ">").replace(/\\\//g, "/").trim();
 }
 
 function attributes(raw: string) {
@@ -242,8 +242,10 @@ function extractImages(html: string, base: URL) {
   return Array.from(found.values()).slice(0, 600);
 }
 
-function extractMundoHentaiGallery(html: string, base: URL) {
-  if (!/^(?:www\.)?mundohentaioficial\.com$/i.test(base.hostname)) return null;
+function extractPostFotosGallery(html: string, base: URL) {
+  const site = /^(?:www\.)?mundohentaioficial\.com$/i.test(base.hostname) ? "mundo-hentai"
+    : /^(?:www\.)?hentaidatia\.com$/i.test(base.hostname) ? "hentai-da-tia" : null;
+  if (!site) return null;
   const gallery = html.match(/<ul\b[^>]*class\s*=\s*["'][^"']*\bpost-fotos\b[^"']*["'][^>]*>([\s\S]*?)<\/ul>/i)?.[1];
   if (!gallery) return null;
   const found = new Map<number, { id: string; url: string; previewUrl: string; alt: string; source: string; format: string; inline: boolean }>();
@@ -268,7 +270,7 @@ function extractMundoHentaiGallery(html: string, base: URL) {
       const pageNumber = Number(number);
       if (found.has(pageNumber)) continue;
       found.set(pageNumber, {
-        id: `mundo-hentai-${id}-${pageNumber}`,
+        id: `${site}-${id}-${pageNumber}`,
         url: url.href,
         previewUrl: url.href,
         alt: `Página ${pageNumber}`,
@@ -316,8 +318,8 @@ export async function POST(request: Request) {
     if (!contentType.includes("html") && !contentType.includes("xml") && !contentType.includes("text")) throw new Error("O endereço não parece ser uma página HTML.");
     const html = await readHtml(response);
     const title = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1]?.replace(/<[^>]+>/g, "").trim() || finalUrl.hostname;
-    const mundoHentaiImages = extractMundoHentaiGallery(html, finalUrl);
-    if (mundoHentaiImages) return Response.json({ pageTitle: htmlDecode(title).slice(0, 180), pageUrl: finalUrl.href, images: mundoHentaiImages, notice: mundoHentaiImages.length >= 600 ? "A galeria contém muitas imagens; mostramos as primeiras 600." : undefined }, { headers: { "cache-control": "no-store" } });
+    const postGalleryImages = extractPostFotosGallery(html, finalUrl);
+    if (postGalleryImages) return Response.json({ pageTitle: htmlDecode(title).slice(0, 180), pageUrl: finalUrl.href, images: postGalleryImages, notice: postGalleryImages.length >= 600 ? "A galeria contém muitas imagens; mostramos as primeiras 600." : undefined }, { headers: { "cache-control": "no-store" } });
     const extracted = extractImages(html, finalUrl);
     const images = extracted.map((image, index) => ({ ...image, id: `img-${index}-${simpleHash(image.url)}`, format: formatFromUrl(image.url) }));
     return Response.json({ pageTitle: htmlDecode(title).slice(0, 180), pageUrl: finalUrl.href, images, notice: extracted.length >= 600 ? "A página contém muitas imagens; mostramos as primeiras 600." : undefined }, { headers: { "cache-control": "no-store" } });

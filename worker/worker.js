@@ -93,12 +93,12 @@ async function scan(request, env) {
   }
   const html = await readHtml(response);
   const title = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1]?.replace(/<[^>]+>/g, "").trim() || finalUrl.hostname;
-  const mundoHentaiImages = extractMundoHentaiGallery(html, finalUrl);
-  if (mundoHentaiImages) return json({
+  const postGalleryImages = extractPostFotosGallery(html, finalUrl);
+  if (postGalleryImages) return json({
     pageTitle: htmlDecode(title).slice(0, 180),
     pageUrl: finalUrl.href,
-    images: mundoHentaiImages,
-    notice: mundoHentaiImages.length >= 600 ? "A galeria contém muitas imagens; mostramos as primeiras 600." : undefined,
+    images: postGalleryImages,
+    notice: postGalleryImages.length >= 600 ? "A galeria contém muitas imagens; mostramos as primeiras 600." : undefined,
   });
   const extracted = extractImages(html, finalUrl);
   const images = extracted.map((image, index) => ({
@@ -114,8 +114,10 @@ async function scan(request, env) {
   });
 }
 
-function extractMundoHentaiGallery(html, base) {
-  if (!/^(?:www\.)?mundohentaioficial\.com$/i.test(base.hostname)) return null;
+function extractPostFotosGallery(html, base) {
+  const site = /^(?:www\.)?mundohentaioficial\.com$/i.test(base.hostname) ? "mundo-hentai"
+    : /^(?:www\.)?hentaidatia\.com$/i.test(base.hostname) ? "hentai-da-tia" : null;
+  if (!site) return null;
   const gallery = html.match(/<ul\b[^>]*class\s*=\s*["'][^"']*\bpost-fotos\b[^"']*["'][^>]*>([\s\S]*?)<\/ul>/i)?.[1];
   if (!gallery) return null;
   const found = new Map();
@@ -140,7 +142,7 @@ function extractMundoHentaiGallery(html, base) {
       const pageNumber = Number(number);
       if (found.has(pageNumber)) continue;
       found.set(pageNumber, {
-        id: `mundo-hentai-${id}-${pageNumber}`,
+        id: `${site}-${id}-${pageNumber}`,
         url: url.href,
         previewUrl: url.href,
         alt: `Página ${pageNumber}`,
@@ -388,7 +390,7 @@ async function bundle(request) {
 }
 
 function htmlDecode(value) {
-  return value.replace(/&amp;/gi, "&").replace(/&quot;/gi, "\"").replace(/&#39;|&apos;/gi, "'")
+  return value.replace(/&amp;|&#0*38;|&#x0*26;/gi, "&").replace(/&quot;/gi, "\"").replace(/&#39;|&apos;/gi, "'")
     .replace(/&lt;/gi, "<").replace(/&gt;/gi, ">").replace(/\\\//g, "/").trim();
 }
 
